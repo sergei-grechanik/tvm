@@ -103,6 +103,7 @@ List of operators
    topi.shape
    topi.ndarray_size
    topi.layout_transform
+   topi.tensordot
    topi.image.resize
    topi.argsort
    topi.topk
@@ -185,6 +186,7 @@ topi
 .. autofunction:: topi.logical_and
 .. autofunction:: topi.logical_or
 .. autofunction:: topi.logical_not
+.. autofunction:: topi.tensordot
 
 topi.nn
 ~~~~~~~
