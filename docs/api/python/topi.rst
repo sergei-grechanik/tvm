@@ -98,6 +98,7 @@ List of operators
    topi.tile
    topi.shape
    topi.layout_transform
+   topi.tensordot
    topi.image.resize
    topi.argsort
    topi.topk
@@ -167,6 +168,7 @@ topi
 .. autofunction:: topi.layout_transform
 .. autofunction:: topi.argsort
 .. autofunction:: topi.topk
+.. autofunction:: topi.tensordot
 
 topi.nn
 ~~~~~~~
