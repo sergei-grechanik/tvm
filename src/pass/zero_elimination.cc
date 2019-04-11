@@ -25,8 +25,99 @@
 #include "arithmetic/ModulusRemainder.h"
 #include "../op/op_util.h"
 
+// Uncomment this line to make zero elimination very verbose
+//#define ZERO_ELIMINATION_VERBOSE true
+#ifdef ZERO_ELIMINATION_VERBOSE
+  #define ZE_LOG_NL() (std::cout << std::endl)
+  #define ZE_LOG(text, value) \
+    ZELog(std::string(__FUNCTION__) + ": " + text, (value))
+  #define ZE_LOG_VAR(var) ZE_LOG(#var, var)
+  #define ZE_LOG_RES(value) \
+    ZELog(std::string(__FUNCTION__) + " returned", (value))
+  #define ZE_LOG_ENTER() auto _ze_log_scope = ZELogScope(__FUNCTION__)
+#else
+  #define ZE_LOG_NL()
+  #define ZE_LOG(text, value)
+  #define ZE_LOG_VAR(var)
+  #define ZE_LOG_RES(value) (value)
+  #define ZE_LOG_ENTER()
+#endif
+
 namespace tvm {
 namespace ir {
+
+// Convert a variable map into a sorted vector of pairs. Sorting is done with deep expr comparison.
+template <typename T>
+std::vector<std::pair<Var, T>> VarMapToVectorOfPairs(const Map<Var, T>& varmap) {
+  using tpair = std::pair<Var, T>;
+  std::vector<tpair> res;
+  for (const tpair& pair : varmap) {
+    res.push_back(pair);
+  }
+  std::sort(res.begin(), res.end(),
+            [](const tpair& l, const tpair& r) { return Compare(l.first, r.first) < 0; });
+  return res;
+}
+
+template <typename T>
+struct PrintSortedVarMapImpl {
+  const Map<Var, T>& varmap_;
+  PrintSortedVarMapImpl(const Map<Var, T>& varmap) : varmap_(varmap) {}
+};
+
+template <typename T>
+std::ostream& operator<<(std::ostream& stream, const PrintSortedVarMapImpl<T>& varmap) {
+  stream << "{";
+  bool first_iteration = true;
+  for (const auto& pair : VarMapToVectorOfPairs(varmap.varmap_)) {
+    if (!first_iteration) {
+      stream << ", ";
+    }
+    stream << pair.first << ": " << pair.second;
+    first_iteration = false;
+  }
+  stream << "}";
+  return stream;
+}
+
+// Print a variable map as a map sorted by variables
+// Usage: std::cout << PrintSortedVarMap(varmap);
+template <typename T>
+PrintSortedVarMapImpl<T> PrintSortedVarMap(const Map<Var, T>& varmap) {
+  return PrintSortedVarMapImpl<T>(varmap);
+}
+
+#ifdef ZERO_ELIMINATION_VERBOSE
+  thread_local size_t ze_log_shift = 0;
+
+  class ZELogScope {
+    public:
+      std::string function_name;
+      explicit ZELogScope(const std::string& fname) : function_name(fname) {
+        std::cout << std::endl << std::string(ze_log_shift*2, ' ') << fname << " {" << std::endl;
+        ++ze_log_shift;
+      }
+      ~ZELogScope() {
+        --ze_log_shift;
+        std::cout << std::string(ze_log_shift*2, ' ')
+          << "} end " << function_name << std::endl << std::endl;
+      }
+  };
+
+  template <typename tvalue>
+  tvalue ZELog(const std::string& message, tvalue&& val) {
+    std::cout << std::string(ze_log_shift*2, ' ')
+      << message << " " << val << std::endl;
+    return val;
+  }
+
+  template <class tvalue>
+  Map<Var, tvalue> ZELog(const std::string& message, const Map<Var, tvalue>& val) {
+    std::cout << std::string(ze_log_shift*2, ' ')
+      << message << " " << PrintSortedVarMap(val) << std::endl;
+    return val;
+  }
+#endif
 
 int gcd(int a, int b) {
     if (a < b) std::swap(a, b);
@@ -108,7 +199,20 @@ Expr SuperSimplify(Expr e, const Map<Var, Range>& vranges = Map<Var, Range>()) {
     e = Substitute(e, vmap);
   }
 
-  return CanonicalSimplify(Simplify(CanonicalSimplify(e, vranges), vranges), vranges);
+  arith::Analyzer an;
+  for (const auto& var_range : vranges) {
+    an.Bind(var_range.first, var_range.second);
+  }
+
+  ZE_LOG("VRANGES", vranges);
+  ZE_LOG("EXPR", e);
+  Expr res = an.canonical_simplify(e);
+  ZE_LOG("CAN", res);
+  res = an.rewrite_simplify(res);
+  ZE_LOG("RW", res);
+  res = an.canonical_simplify(res);
+  ZE_LOG("CAN(RES)", res);
+  return res;
 }
 
 // Provability check that uses SuperSimplify
@@ -303,24 +407,33 @@ Array<IterVar> IterVarsFromMap(const Array<Var>& vars, const Map<Var, Range>& vr
 
 // Return true if this combiner is just a sum.
 bool IsSumCombiner(const CommReducer& combiner, const Map<Var, Range>& vranges) {
+  ZE_LOG_ENTER();
+  ZE_LOG_VAR(combiner);
+  ZE_LOG_VAR(vranges);
+
   if (combiner->result.size() != 1) {
-    return false;
+    return ZE_LOG_RES(false);
   }
 
   if (!is_const_value(SuperSimplify(combiner->identity_element[0], vranges), 0)) {
-    return false;
+    return ZE_LOG_RES(false);
   }
 
   Expr should_be_zero =
       SuperSimplify(combiner->result[0] - (combiner->lhs[0] + combiner->rhs[0]), vranges);
-  return is_const_value(should_be_zero, 0);
+  return ZE_LOG_RES(is_const_value(should_be_zero, 0));
 }
 
 // Return true if zero may be factored out of a reduction with this combiner.
 bool CanFactorZeroFromCombiner(const CommReducer& combiner, int value_index,
                                const Map<Var, Range>& vranges) {
+  ZE_LOG_ENTER();
+  ZE_LOG_VAR(combiner);
+  ZE_LOG_VAR(value_index);
+  ZE_LOG_VAR(vranges);
+
   if (!is_const_value(SuperSimplify(combiner->identity_element[value_index], vranges), 0)) {
-    return false;
+    return ZE_LOG_RES(false);
   }
 
   Expr zero = make_zero(combiner->result[value_index].type());
@@ -329,11 +442,14 @@ bool CanFactorZeroFromCombiner(const CommReducer& combiner, int value_index,
                         {combiner->rhs[value_index], zero}});
   in = SuperSimplify(in, vranges);
 
-  return is_const_value(in, 0);
+  return ZE_LOG_RES(is_const_value(in, 0));
 }
 
 // If expr is a Call node, perform inlining, otherwise do nothing
 Expr InlineThisCall(const Expr& expr) {
+  ZE_LOG_ENTER();
+  ZE_LOG_VAR(expr);
+
   if (const Call* op = expr.as<Call>()) {
     if (op->call_type == Call::CallType::Halide) {
       if (const ComputeOpNode* op_comp = op->func.as<ComputeOpNode>()) {
@@ -346,13 +462,13 @@ Expr InlineThisCall(const Expr& expr) {
                               op_comp->body[op->value_index]);
         if (const ir::Evaluate* ev = inlined.as<ir::Evaluate>()) {
           // If it is a reduction, clone it
-          return CloneReduction(ev->value);
+          return ZE_LOG_RES(CloneReduction(ev->value));
         }
       }
     }
   }
 
-  return expr;
+  return ZE_LOG_RES(expr);
 }
 
 Tensor InlineTailCall(const Tensor& tensor) {
@@ -395,7 +511,11 @@ class InlineTensorsMutator : public IRMutator {
 
 Expr InlineTensors(const Expr& expr, const Array<Tensor>& inlineable,
                    bool inline_reductions) {
-  return InlineTensorsMutator(inlineable, inline_reductions).Mutate(expr);
+  ZE_LOG_ENTER();
+  ZE_LOG_VAR(expr);
+  ZE_LOG_VAR(inlineable);
+  ZE_LOG_VAR(inline_reductions);
+  return ZE_LOG_RES(InlineTensorsMutator(inlineable, inline_reductions).Mutate(expr));
 }
 
 Tensor InlineTensors(const Tensor& tensor, const Array<Tensor>& inlineable,
@@ -413,6 +533,10 @@ struct NonzeronessConditionResult {
 
   Expr to_expr() const {
     return SelectElseZero(cond, value);
+  }
+
+  friend std::ostream& operator<<(std::ostream& os, const NonzeronessConditionResult& r) {
+    return os << r.to_expr();
   }
 };
 
@@ -574,7 +698,9 @@ class NonzeronessConditionFunctor
 // Transform expr into a pair (condition, new_expr) such that the old expr is equivalent to
 // `select(condition, new_expr, 0)`. The pair is represented as a struct for clarity.
 NonzeronessConditionResult NonzeronessCondition(const Expr& expr) {
-  return NonzeronessConditionFunctor().NonzeronessCondition(expr);
+  ZE_LOG_ENTER();
+  ZE_LOG_VAR(expr);
+  return ZE_LOG_RES(NonzeronessConditionFunctor().NonzeronessCondition(expr));
 }
 
 Expr LiftNonzeronessCondition(const Expr& expr) {
@@ -839,7 +965,10 @@ class RemoveRedundantInequalitiesMutator : public IRMutator {
 // Propagate information from conditions and remove redundant inequalities
 // TODO(sgrechanik-h): This should be merged into standard simplifiers
 Expr RemoveRedundantInequalities(const Expr& expr, const Array<Expr>& known) {
-  return RemoveRedundantInequalitiesMutator(known).Mutate(expr);
+  ZE_LOG_ENTER();
+  ZE_LOG_VAR(expr);
+  ZE_LOG_VAR(known);
+  return ZE_LOG_RES(RemoveRedundantInequalitiesMutator(known).Mutate(expr));
 }
 
 
@@ -1015,6 +1144,9 @@ EliminateDivModResult EliminateDivMod(const Expr& expr, Map<Var, Range> ranges) 
 
 // run EliminateDivMod from the conditions of a domain
 DomainTransformation EliminateDivModFromDomainConditions(const Domain& domain) {
+  ZE_LOG_ENTER();
+  ZE_LOG_VAR(domain);
+
   auto elim_res = EliminateDivMod(All(domain->conditions), domain->ranges);
 
   Map<Var, Range> new_vranges = elim_res.ranges;
@@ -1031,12 +1163,16 @@ DomainTransformation EliminateDivModFromDomainConditions(const Domain& domain) {
     new_to_old.Set(v, v);
   }
 
-  return DomainTransformationNode::make(new_domain, domain, new_to_old, old_to_new);
+  return ZE_LOG_RES(DomainTransformationNode::make(new_domain, domain, new_to_old, old_to_new));
 }
 
 // run EliminateDivMod from the condition of a reduction
 Expr EliminateDivModFromReductionCondition(const Expr& expr,
                                            Map<Var, Range> vranges = Map<Var, Range>()) {
+  ZE_LOG_ENTER();
+  ZE_LOG_VAR(expr);
+  ZE_LOG_VAR(vranges);
+
   if (const Reduce* red = expr.as<Reduce>()) {
     for (const IterVar& iv : red->axis) {
       vranges.Set(iv->var, iv->dom);
@@ -1051,15 +1187,19 @@ Expr EliminateDivModFromReductionCondition(const Expr& expr,
 
     Expr new_cond = elim_res.expr && All(elim_res.conditions);
 
-    return Reduce::make(red->combiner, red->source, new_axis, new_cond, red->value_index);
+    return ZE_LOG_RES(Reduce::make(red->combiner, red->source, new_axis,
+                                   new_cond, red->value_index));
   } else {
-    return expr;
+    return ZE_LOG_RES(expr);
   }
 }
 
 // Add copies of outer variables (that are used in the conditions but are missing from the domain
 // variables) to the list of domain variables.
 DomainTransformation AddOuterVariablesIntoDomain(const Domain& domain) {
+  ZE_LOG_ENTER();
+  ZE_LOG_VAR(domain);
+
   std::unordered_set<const Variable*> vset;
   for (const Var& v : domain->variables) {
     vset.insert(v.get());
@@ -1095,7 +1235,7 @@ DomainTransformation AddOuterVariablesIntoDomain(const Domain& domain) {
   }
 
   Domain new_domain = DomainNode::make(new_variables, new_conditions, new_ranges);
-  return DomainTransformationNode::make(new_domain, domain, new_to_old, old_to_new);
+  return ZE_LOG_RES(DomainTransformationNode::make(new_domain, domain, new_to_old, old_to_new));
 }
 
 
@@ -1122,6 +1262,9 @@ std::tuple<int64_t, int64_t, int64_t> xgcd(int64_t a, int64_t b) {
 }
 
 DomainTransformation SolveSystemOfEquations(const Domain& domain) {
+  ZE_LOG_ENTER();
+  ZE_LOG_VAR(domain);
+
   // Conditions we don't know what to do with
   std::vector<Expr> rest;
   // Matrix represented as a vector of rows, each row is an array of coefficients
@@ -1379,7 +1522,7 @@ DomainTransformation SolveSystemOfEquations(const Domain& domain) {
     }
     new_cond = SuperSimplify(new_cond, domain->ranges);
     if (is_const_int(new_cond, 0)) {
-      return EmptyDomainTransformation(domain);
+      return ZE_LOG_RES(EmptyDomainTransformation(domain));
     } else if (!is_const_int(new_cond, 1)) {
       conditions.push_back(new_cond);
     }
@@ -1422,6 +1565,9 @@ DomainTransformation SolveSystemOfEquations(const Domain& domain) {
     old_to_new_map.Set(domain->variables[i], e);
   }
 
+  // From now on we will use sorted domain variable ranges to increase determinism
+  std::vector<std::pair<Var, Range>> sorted_domain_ranges = VarMapToVectorOfPairs(domain->ranges);
+
   // The resulting ranges
   Map<Var, Range> ranges;
 
@@ -1430,7 +1576,7 @@ DomainTransformation SolveSystemOfEquations(const Domain& domain) {
   for (const Var& v : domain->variables) {
     vset.insert(v.get());
   }
-  for (const auto& p : domain->ranges) {
+  for (const auto& p : sorted_domain_ranges) {
     if (!vset.count(p.first.get())) {
       ranges.Set(p.first, p.second);
     }
@@ -1438,7 +1584,7 @@ DomainTransformation SolveSystemOfEquations(const Domain& domain) {
 
   // Convert original ranges to IntSets
   std::unordered_map<const Variable*, IntSet> var_intsets;
-  for (const auto& p : domain->ranges) {
+  for (const auto& p : sorted_domain_ranges) {
     var_intsets[p.first.get()] = IntSet::range(p.second);
   }
 
@@ -1452,7 +1598,7 @@ DomainTransformation SolveSystemOfEquations(const Domain& domain) {
 
   // We have to transform ranges of the old variables into conditions over new variables because new
   // ranges are not enough usually.
-  for (const auto& p : domain->ranges) {
+  for (const auto& p : sorted_domain_ranges) {
     if (old_to_new_map.count(p.first)) {
       Expr in_terms_of_new = old_to_new_map[p.first];
       Expr lower_cond = SuperSimplify(p.second->min <= in_terms_of_new, ranges);
@@ -1472,7 +1618,8 @@ DomainTransformation SolveSystemOfEquations(const Domain& domain) {
   }
 
   Domain new_domain = DomainNode::make(new_vars, conditions, ranges);
-  return DomainTransformationNode::make(new_domain, domain, new_to_old_map, old_to_new_map);
+  return ZE_LOG_RES(DomainTransformationNode::make(new_domain, domain,
+                                                   new_to_old_map, old_to_new_map));
 }
 
 
@@ -1758,13 +1905,16 @@ SolveSystemOfInequalitiesResult SolveSystemOfInequalities(const Array<Expr>& ine
 
 // Deskew the given domain
 DomainTransformation DeskewDomain(const Domain& domain) {
+  ZE_LOG_ENTER();
+  ZE_LOG_VAR(domain);
+
   // Resulting ranges will contain ranges for the new variables and for the variables that are
   // not in the domain->variables but are in domain->ranges
   Map<Var, Range> res_ranges;
 
   // vars are variables from domain's variables followed by all the other variables from its ranges
   Array<Var> vars = domain->variables;
-  for (const auto& pair : domain->ranges) {
+  for (const auto& pair : VarMapToVectorOfPairs(domain->ranges)) {
     bool already = false;
     for (const Var& v : vars) {
       already = already || v.same_as(pair.first);
@@ -1777,6 +1927,8 @@ DomainTransformation DeskewDomain(const Domain& domain) {
   }
 
   auto solved_system = SolveSystemOfInequalities(domain->conditions, vars, domain->ranges);
+
+  ZE_LOG("Conds after FME", solved_system.as_conditions());
 
   Map<Var, Expr> res_old_to_new;
   Map<Var, Expr> res_new_to_old;
@@ -1795,6 +1947,7 @@ DomainTransformation DeskewDomain(const Domain& domain) {
   // This order is needed to compute new ranges.
   for (auto it = domain->variables.rbegin(); it != domain->variables.rend(); ++it) {
     const Var& var = *it;
+    ZE_LOG_NL();
     ZE_LOG("Processing variable", var);
     auto& bnd = solved_system.bounds[var.get()];
     // Note that we replace old vars with new ones
@@ -1823,10 +1976,13 @@ DomainTransformation DeskewDomain(const Domain& domain) {
       Expr best_diff_over = vranges[var]->extent - 1;
 
       ZE_LOG("Initial best low", best_lower);
-      ZE_LOG("Initial best diff", best_diff_over);
+      ZE_LOG("Initial best diff_over", best_diff_over);
 
       for (const Expr& low : lowers) {
         for (const Expr& upp : uppers) {
+          ZE_LOG_NL();
+          ZE_LOG("Considering low", low);
+          ZE_LOG("Considering upp", upp);
           Expr diff_1 = SuperSimplify((upp - low) / bnd.coef, vranges);
           // Since diff may depend on some other variables, we compute its overapproximation
           Expr diff_over_1 = SuperSimplify(EvalSet(diff_1, new_var_intsets).max(), vranges);
@@ -1840,11 +1996,13 @@ DomainTransformation DeskewDomain(const Domain& domain) {
           } else if (CanProve(low > -bnd.coef, vranges)) {
             low_divided = (low + bnd.coef - 1) / bnd.coef;
           } else {
+            ZE_LOG("The sign of low is unknown:", low);
             // We don't use the commented out rounding-up division here because it leads to
             // overly complex expressions. So we just use the ordinary division.
             // low_divided = (low + Select::make(low <= -bnd.coef, 0, bnd.coef - 1)) / bnd.coef;
             low_divided = low / bnd.coef;
             // However diff_1_over is not correct when we use the ordinary division, so increase it
+            diff_1 = diff_1 + 1;
             diff_over_1 = diff_over_1 + 1;
           }
           low_divided = SuperSimplify(low_divided, vranges);
@@ -1854,6 +2012,12 @@ DomainTransformation DeskewDomain(const Domain& domain) {
           Expr diff_2 = SuperSimplify(upp / bnd.coef - low_divided, vranges);
           Expr diff_over_2 = SuperSimplify(EvalSet(diff_2, new_var_intsets).max(), vranges);
 
+          ZE_LOG("Considering low_divided", low_divided);
+          ZE_LOG("Considering diff_1", diff_1);
+          ZE_LOG("Considering diff_over_1", diff_over_1);
+          ZE_LOG("Considering diff_2", diff_2);
+          ZE_LOG("Considering diff_over_2", diff_over_2);
+
           // If it is provable that the new one is strictly better than the current best one,
           // then replace it. Note that we are biased towards earlier pairs which should be simpler.
           if (CanProve(diff_over_1 - best_diff_over < 0, vranges)) {
@@ -1862,7 +2026,6 @@ DomainTransformation DeskewDomain(const Domain& domain) {
             best_lower = low_divided;
             best_diff_over = diff_over_1;
           } else if (CanProve(diff_over_2 - best_diff_over < 0, vranges)) {
-            std::cout << "WARNING: DIF_OVER_2 was used" << std::endl;
             ZE_LOG("Current best low", low_divided);
             ZE_LOG("Current best diff", diff_over_2);
             best_lower = low_divided;
@@ -1870,6 +2033,10 @@ DomainTransformation DeskewDomain(const Domain& domain) {
           }
         }
       }
+
+      ZE_LOG_NL();
+      ZE_LOG("Resulting best low", best_lower);
+      ZE_LOG("Resulting best diff_over", best_diff_over);
 
       std::string suffix = Equal(best_lower, vranges[var]->min) ? "" : ".shifted";
       Var new_var = var.copy_with_suffix(suffix);
@@ -1882,7 +2049,6 @@ DomainTransformation DeskewDomain(const Domain& domain) {
         ZE_LOG("Replaced with", best_lower);
       } else {
         res_old_to_new.Set(var, new_var + best_lower);
-        ZE_LOG("Replaced with", new_var + best_lower);
         // Note that we are substituting old with new, so best_lower contains new var,
         // that is we have to substitute new with old in best_lower here
         res_new_to_old.Set(new_var,
@@ -1895,6 +2061,9 @@ DomainTransformation DeskewDomain(const Domain& domain) {
         res_variables.push_back(new_var);
         res_ranges.Set(new_var, range);
         vranges.Set(new_var, range);
+
+        ZE_LOG("Replaced with", new_var + best_lower);
+        ZE_LOG("New var range", range);
       }
     }
   }
@@ -1911,13 +2080,18 @@ DomainTransformation DeskewDomain(const Domain& domain) {
   res_variables = Array<Var>(res_variables.rbegin(), res_variables.rend());
 
   Domain new_domain = DomainNode::make(res_variables, res_conditions, res_ranges);
-  return DomainTransformationNode::make(new_domain, domain, res_new_to_old, res_old_to_new);
+  return ZE_LOG_RES(DomainTransformationNode::make(new_domain, domain,
+                                                   res_new_to_old, res_old_to_new));
 }
 
 
 // Simplify an iteration domain.
 DomainTransformation SimplifyDomain(const Domain& domain,
                                     bool eliminate_div_mod) {
+  ZE_LOG_ENTER();
+  ZE_LOG_VAR(domain);
+  ZE_LOG_VAR(eliminate_div_mod);
+
   DomainTransformation transf = IdDomainTransformation(domain);
 
   if (eliminate_div_mod) {
@@ -1939,11 +2113,15 @@ DomainTransformation SimplifyDomain(const Domain& domain,
     transf += tr;
   }
 
-  return transf;
+  return ZE_LOG_RES(transf);
 }
 
 // Use the condition of a reduction op to simplify its domain (axis)
 Expr SimplifyReductionDomain(const Expr& expr, const Map<Var, Range>& outer_vranges) {
+  ZE_LOG_ENTER();
+  ZE_LOG_VAR(expr);
+  ZE_LOG_VAR(outer_vranges);
+
   if (const Reduce* red = expr.as<Reduce>()) {
     Map<Var, Range> vranges = Merge(outer_vranges, IterVarsToMap(red->axis));
     Domain domain = DomainNode::make(IterVarsToVars(red->axis),
@@ -1960,25 +2138,31 @@ Expr SimplifyReductionDomain(const Expr& expr, const Map<Var, Range>& outer_vran
         IterVarsFromMap(res->new_domain->variables, res->new_domain->ranges, kCommReduce);
 
     // Perform simplification mainly to remove a possibly empty reduction.
-    return SuperSimplify(Reduce::make(red->combiner, new_source, new_axis,
-                                      All(res->new_domain->conditions),
-                                      red->value_index));
+    return ZE_LOG_RES(SuperSimplify(Reduce::make(red->combiner, new_source, new_axis,
+                                                 All(res->new_domain->conditions),
+                                                 red->value_index)));
   } else {
-    return expr;
+    return ZE_LOG_RES(expr);
   }
 }
 
 // Extract the given expr under the given condition as a separate tensor if the volume of the
 // extracted tensor will be less than the volume of the outer_axis
-Expr ExtractAsTensorMaybe(const Expr& e, const Expr& cond,
+Expr ExtractAsTensorMaybe(const Expr& expr, const Expr& cond,
                           const Array<Var>& outer_axis,
                           const Map<Var, Range>& vranges) {
+  ZE_LOG_ENTER();
+  ZE_LOG_VAR(expr);
+  ZE_LOG_VAR(cond);
+  ZE_LOG_VAR(outer_axis);
+  ZE_LOG_VAR(vranges);
+
   Domain domain = DomainNode::make(outer_axis,
                                    FactorOutAtomicFormulas(cond).to_array(),
                                    vranges);
   auto res = SimplifyDomain(domain);
 
-  Expr new_expr = SuperSimplify(Substitute(e, res->old_to_new), res->new_domain->ranges);
+  Expr new_expr = SuperSimplify(Substitute(expr, res->old_to_new), res->new_domain->ranges);
   // This is mostly done to simplify if_then_else which is not known by the Halide simplifier
   new_expr = RemoveRedundantInequalities(new_expr, res->new_domain->conditions);
 
@@ -1992,15 +2176,15 @@ Expr ExtractAsTensorMaybe(const Expr& e, const Expr& cond,
 
   // If the expression does not use vars then it is probably better to keep it inlined
   if (used_res_variables.empty()) {
-    // We can return the new_expr here instead of the old e because it doesn't use variables
+    // We can return the new_expr here instead of the old expr because it doesn't use variables
     // otherwise we would need to replace the new vars or create a let-expression
-    return new_expr;
+    return ZE_LOG_RES(new_expr);
   }
 
   // If it's already a call to a tensor then extracting it will probably be useless
   if (const Call* call = new_expr.as<Call>()) {
     if (call->call_type == Call::CallType::Halide) {
-      return e;
+      return ZE_LOG_RES(expr);
     }
   }
 
@@ -2018,7 +2202,7 @@ Expr ExtractAsTensorMaybe(const Expr& e, const Expr& cond,
   // if we can prove that the old volume is not greater than the new volume then
   // prefer the old expression.
   if (CanProve(old_volume <= new_volume, vranges)) {
-    return e;
+    return ZE_LOG_RES(expr);
   }
 
   Tensor tensor =
@@ -2030,8 +2214,8 @@ Expr ExtractAsTensorMaybe(const Expr& e, const Expr& cond,
     args.push_back(res->new_to_old[var]);
   }
 
-  return Call::make(e.type(), tensor->op->name, args,
-                    Call::CallType::Halide, tensor->op, tensor->value_index);
+  return ZE_LOG_RES(Call::make(expr.type(), tensor->op->name, args,
+                               Call::CallType::Halide, tensor->op, tensor->value_index));
 }
 
 
@@ -2064,6 +2248,11 @@ std::pair<Expr, Expr> ImplicationNotContainingVars(
 std::pair<Expr, Expr> LiftConditionsThroughReduction(const Expr& cond,
                                                      const Array<IterVar>& red_axis,
                                                      const Array<IterVar>& outer_axis) {
+  ZE_LOG_ENTER();
+  ZE_LOG_VAR(cond);
+  ZE_LOG_VAR(red_axis);
+  ZE_LOG_VAR(outer_axis);
+
   // Factor out atomics so that we can consider this as a system of inequalities
   auto factoratomic_res = FactorOutAtomicFormulas(cond);
   Array<Expr> atomics = factoratomic_res.atomic_formulas;
@@ -2091,7 +2280,10 @@ std::pair<Expr, Expr> LiftConditionsThroughReduction(const Expr& cond,
 
   // The outer (first) condition does not contain reduction vars,
   // the inner (second) condition is everything else
-  return ImplicationNotContainingVars(rewritten_cond, vset);
+  auto res = ImplicationNotContainingVars(rewritten_cond, vset);
+  ZE_LOG_VAR(res.first);
+  ZE_LOG_VAR(res.second);
+  return res;
 }
 
 class ExtractReductionsMutator : public IRMutator {
@@ -2154,12 +2346,21 @@ class ExtractReductionsMutator : public IRMutator {
 Expr ExtractReductions(const Expr& expr,
                        const Array<Var>& outer_axis,
                        const Map<Var, Range>& vranges) {
-  return ExtractReductionsMutator(outer_axis, vranges).Mutate(expr);
+  ZE_LOG_ENTER();
+  ZE_LOG_VAR(expr);
+  ZE_LOG_VAR(outer_axis);
+  ZE_LOG_VAR(vranges);
+  return ZE_LOG_RES(ExtractReductionsMutator(outer_axis, vranges).Mutate(expr));
 }
 
 Expr ExtractNonTopReductions(const Expr& expr,
                              const Array<Var>& outer_axis,
                              const Map<Var, Range>& vranges) {
+  ZE_LOG_ENTER();
+  ZE_LOG_VAR(expr);
+  ZE_LOG_VAR(outer_axis);
+  ZE_LOG_VAR(vranges);
+
   if (const Reduce* red = expr.as<Reduce>()) {
     Array<Var> new_outer_axis = Concat(IterVarsToVars(red->axis), outer_axis);
     Map<Var, Range> new_vranges = Merge(vranges, IterVarsToMap(red->axis));
@@ -2169,21 +2370,27 @@ Expr ExtractNonTopReductions(const Expr& expr,
     }
     Expr new_condition = ExtractReductions(red->condition, new_outer_axis, new_vranges);
 
-    return Reduce::make(red->combiner, new_source, red->axis,
-                        new_condition, red->value_index);
+    return ZE_LOG_RES(Reduce::make(red->combiner, new_source, red->axis,
+                                   new_condition, red->value_index));
   } else {
-    return ExtractReductions(expr, outer_axis, vranges);
+    return ZE_LOG_RES(ExtractReductions(expr, outer_axis, vranges));
   }
 }
 
 Expr OptimizeAndLiftNonzeronessConditionsImpl(const Expr& expr_orig,
                                               const Array<IterVar>& axis,
                                               const Map<Var, Range>& vranges) {
+  ZE_LOG_ENTER();
+  ZE_LOG_VAR(expr_orig);
+  ZE_LOG_VAR(axis);
+  ZE_LOG_VAR(vranges);
+
   Expr result;
   Map<Var, Range> combined_vranges = Merge(vranges, IterVarsToMap(axis));
 
   // Simplify the original expression first, mostly to simplify combiners
   Expr expr = SuperSimplify(expr_orig, combined_vranges);
+  ZE_LOG("expr (after simplification)", expr);
 
   if (const Reduce* red = expr.as<Reduce>()) {
     // TODO(sgrechanik-h): There are some other operations which behave like sum
@@ -2210,7 +2417,7 @@ Expr OptimizeAndLiftNonzeronessConditionsImpl(const Expr& expr_orig,
 
         // If the reduction disappears completely then transform the result as a non-reduction
         if (!red) {
-          return OptimizeAndLiftNonzeronessConditionsImpl(new_red, axis, vranges);
+          return ZE_LOG_RES(OptimizeAndLiftNonzeronessConditionsImpl(new_red, axis, vranges));
         }
       }
 
@@ -2241,7 +2448,7 @@ Expr OptimizeAndLiftNonzeronessConditionsImpl(const Expr& expr_orig,
                                         combined_vranges);
       result = SelectElseZero(new_outer_cond, new_reduce);
     } else {
-      return SimplifyReductionDomain(expr, combined_vranges);
+      return ZE_LOG_RES(SimplifyReductionDomain(expr, combined_vranges));
     }
   } else {
     auto nz = NonzeronessCondition(expr);
@@ -2258,8 +2465,9 @@ Expr OptimizeAndLiftNonzeronessConditionsImpl(const Expr& expr_orig,
 
   // Sometimes ExtractAsTensorMaybe doesn't perform extraction, so there may be some non-top
   // reductions left, take care of them
-  return SuperSimplify(ExtractNonTopReductions(result, IterVarsToVars(axis), combined_vranges),
-                       combined_vranges);
+  result = SuperSimplify(ExtractNonTopReductions(result, IterVarsToVars(axis), combined_vranges),
+                         combined_vranges);
+  return ZE_LOG_RES(result);
 }
 
 Tensor OptimizeAndLiftNonzeronessConditions(const Tensor& tensor, const Map<Var, Range>& vranges) {
@@ -2287,10 +2495,10 @@ TVM_STATIC_IR_FUNCTOR(IRPrinter, vtable)
     for (const auto& v : d->variables) {
       volume *= d->ranges[v]->extent;
     }
-    p->stream << "Domain(volume=" << volume
+    p->stream << "Domain(box_volume=" << volume
               << ", variables=" << d->variables
               << ", conditions=" << d->conditions
-              << ", ranges=" << d->ranges << ')';
+              << ", ranges=" << PrintSortedVarMap(d->ranges) << ")";
   });
 
 TVM_REGISTER_NODE_TYPE(DomainNode);
@@ -2312,8 +2520,8 @@ TVM_STATIC_IR_FUNCTOR(IRPrinter, vtable)
 .set_dispatch<DomainTransformationNode>([](const DomainTransformationNode* d, IRPrinter* p) {
     p->stream << "DomainTransformation(new_domain=" << d->new_domain
               << ", old_domain=" << d->old_domain
-              << ", new_to_old=" << d->new_to_old
-              << ", old_to_new=" << d->old_to_new << ')';
+              << ", new_to_old=" << PrintSortedVarMap(d->new_to_old)
+              << ", old_to_new=" << PrintSortedVarMap(d->old_to_new) << ')';
   });
 
 TVM_REGISTER_NODE_TYPE(DomainTransformationNode);
