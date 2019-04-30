@@ -5,9 +5,18 @@ from tvm.testing import check_numerical_grads, estimate_performance, Performance
 import time
 import inspect
 import sys
+import argparse
 
 # Whether to dump the generated code
 verbose = False
+# Whether to perform numerical gradient testing
+perform_numgrad_test = True
+# Raise an exception when performance estimates are too high
+fail_when_perf_estimates_too_high = True
+# Run only these lines
+enabled_lines = set()
+# Lines (among the enabled_lines) that were actually run
+actually_run = set()
 
 def get_shape(tensor, param_values=None):
     if param_values is None:
@@ -43,6 +52,11 @@ def check_equivalence(outputs1, outputs2, inputs, in_range=(-10, 10), iters=3):
 def check_grad(out, inputs, args=[], in_range=(-10,10), perf=None, param_values=None,
                acceptable_fail_fraction=None):
     line = inspect.getframeinfo(inspect.stack()[1][0]).lineno
+
+    if enabled_lines:
+        if line not in enabled_lines:
+            return
+        actually_run.add(line)
 
     if not isinstance(inputs, (list, tuple)):
         inputs = [inputs]
@@ -85,9 +99,10 @@ def check_grad(out, inputs, args=[], in_range=(-10,10), perf=None, param_values=
 
         if verbose:
             print("Note: performance tuples are (iterations, multiplications, memory)")
-            print("Expected performance of grads: {}".format(perf))
-            print("Estimated performance of grads: {}".format(est.as_tuple()))
-            print("Estimated performance of lowered grads: {}".format(est_lowered.as_tuple()))
+            print("Line {}: Expected performance of grads: {}".format(line, perf))
+            print("Line {}: Estimated performance of grads: {}".format(line, est.as_tuple()))
+            print("Line {}: Estimated performance of lowered grads: {}"
+                  .format(line, est_lowered.as_tuple()))
             print()
 
         if est_lowered.memory > est.memory:
@@ -119,10 +134,14 @@ def check_grad(out, inputs, args=[], in_range=(-10,10), perf=None, param_values=
 
             EST_RTOL = 1.5
             if iters > ref_iters*EST_RTOL or mults > ref_mults*EST_RTOL or mem > ref_mem*EST_RTOL:
-                raise AssertionError("Line {}: Some of the estimated performance metrics are much "
-                                     "worse than the reference ones (by {}): "
-                                     "estimated {}, expected {}"
-                                     .format(line, EST_RTOL, est.as_tuple(), ref_est.as_tuple()))
+                message = ("Line {}: Some of the estimated performance metrics are much "
+                           "worse than the reference ones (by {}): "
+                           "estimated {}, expected {}"
+                           .format(line, EST_RTOL, est.as_tuple(), ref_est.as_tuple()))
+                if fail_when_perf_estimates_too_high:
+                    raise AssertionError(message)
+                else:
+                    print(message)
 
     input_vals = [tvm.nd.array(np.random.uniform(in_range[0], in_range[1],
                                                  size=get_shape(a, param_values)).astype(a.dtype))
@@ -143,8 +162,9 @@ def check_grad(out, inputs, args=[], in_range=(-10,10), perf=None, param_values=
     mgrad(*g_arg_vals)
     g_res = [g_arg_vals[g].asnumpy() for g, _ in enumerate(grads)]
 
-    check_numerical_grads(fun, [a.asnumpy() for a in input_vals], g_res,
-                          acceptable_fail_fraction=acceptable_fail_fraction)
+    if perform_numgrad_test:
+        check_numerical_grads(fun, [a.asnumpy() for a in input_vals], g_res,
+                              acceptable_fail_fraction=acceptable_fail_fraction)
 
 def test_differentiate_function():
     x = tvm.placeholder((32, 3, 28, 28), name='x')
@@ -471,12 +491,31 @@ def test_free_vars():
     check_grad(R, X, perf=(200, 1248, 136), param_values=param_values)
 
 if __name__ == "__main__":
-    if "-v" in sys.argv:
-        verbose = True
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-v", "--verbose", action='store_true',
+                        help="Be more verbose")
+    parser.add_argument("-l", "--line", type=int, nargs='+', default=[],
+                        help="Run only the specified lines")
+    parser.add_argument("--no-numgrad", action='store_true',
+                        help="Don't perform numerical gradient testing")
+    parser.add_argument("--no-perf", action='store_true',
+                        help="Don't fail when performance estimates are too high")
+    args = parser.parse_args()
+    verbose = args.verbose
+    enabled_lines = set(args.line)
+    perform_numgrad_test = not args.no_numgrad
+    fail_when_perf_estimates_too_high = not args.no_perf
 
-    #test_differentiate_function()
     test_autodiff()
     test_topi_autodiff()
     test_stride_dilation()
     test_some_conv2d_net()
     test_free_vars()
+
+    if enabled_lines:
+        unrun = enabled_lines.difference(actually_run)
+        if unrun:
+            raise ValueError("The following lines haven't been found: {}".format(unrun))
+    else:
+        # These tests don't participate in running by line numbers
+        test_differentiate_function()
