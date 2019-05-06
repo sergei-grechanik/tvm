@@ -36,27 +36,34 @@ namespace arith {
 
 using namespace ir;
 
+//#define COUT_LINE std::cout << "RW " << __LINE__ << "\n"
+#define COUT_LINE
+
 // macro for doing simple rewrite
 #define TVM_TRY_REWRITE(SrcExpr, ResExpr)       \
   if ((SrcExpr).Match(ret)) {                   \
+    COUT_LINE;     \
     return (ResExpr).Eval();                    \
   }
 
 // macro for rewrite + recursively rewrite ResExpr
 #define TVM_TRY_RECURSIVE_REWRITE(SrcExpr, ResExpr) \
   if ((SrcExpr).Match(ret)) {                       \
+    COUT_LINE;         \
     return RecursiveRewrite((ResExpr).Eval());      \
   }
 
 // macro rewrite only if CondExor is true after match.
 #define TVM_TRY_REWRITE_IF(SrcExpr, ResExpr, CondExpr)  \
   if ((SrcExpr).Match(ret) && (CondExpr)) {             \
+    COUT_LINE;             \
     return (ResExpr).Eval();                            \
   }
 
 // macro rewrite + recursive_rewrite only if CondExor is true after match.
 #define TVM_TRY_RECURSIVE_REWRITE_IF(SrcExpr, ResExpr, CondExpr)  \
   if ((SrcExpr).Match(ret) && (CondExpr)) {                       \
+    COUT_LINE;                       \
     return RecursiveRewrite((ResExpr).Eval());                    \
   }
 
