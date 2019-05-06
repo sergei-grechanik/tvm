@@ -611,6 +611,12 @@ def test_logical_simplify():
     ck.verify(tvm.expr.Or(2 <= x, x <= 1), tvm.const(True, "bool"))
     ck.verify(tvm.expr.Or(x != 1, x == 2), x != 1)
 
+def test_add_float_simplify():
+    ck = RewriteChecker()
+    x, y, z = tvm.var("x", "float32"), tvm.var("y", "float32"), tvm.var("z", "float32")
+
+    print(100*"=")
+    ck.verify((x + y) - (x + y), tvm.const(0, "float32"))
 
 if __name__ == "__main__":
     test_cmp_simplify()
@@ -624,3 +630,4 @@ if __name__ == "__main__":
     test_mod_index_simplify()
     test_select_simplify()
     test_logical_simplify()
+    test_add_float_simplify()

@@ -333,6 +333,27 @@ Mutate_(const Sub* op, const Expr& self) {
     TVM_TRY_RECURSIVE_REWRITE((x + c1) - y, (x - y) + c1);
     TVM_TRY_RECURSIVE_REWRITE(x - (y - z), (x + z) - y);
     TVM_TRY_RECURSIVE_REWRITE(x - y * c1, x + y * (0 - c1));
+  } else {
+    // Floating point rules
+    TVM_TRY_REWRITE(min(x, y) - x, min(0, y - x));
+    TVM_TRY_REWRITE(min(x, y) - y, min(x - y, 0));
+    TVM_TRY_REWRITE(max(x, y) - x, max(0, y - x));
+    TVM_TRY_REWRITE(max(x, y) - y, max(x - y, 0));
+
+    TVM_TRY_REWRITE(x - max(x, y), min(0, x - y));
+    TVM_TRY_REWRITE(y - max(x, y), min(y - x, 0));
+    TVM_TRY_REWRITE(x - min(x, y), max(0, x - y));
+    TVM_TRY_REWRITE(y - min(x, y), max(y - x, 0));
+
+    TVM_TRY_REWRITE(x - x, ZeroWithTypeLike(x));
+
+    TVM_TRY_REWRITE(min(x, y) - min(y, x), ZeroWithTypeLike(x));
+    TVM_TRY_REWRITE(max(x, y) - max(y, x), ZeroWithTypeLike(x));
+
+    // canonicalization rule
+    // will try rewrite again after canonicalization.
+    TVM_TRY_REWRITE(x - c1, x + (0 - c1));
+    TVM_TRY_RECURSIVE_REWRITE(x - y * c1, x + y * (0 - c1));
   }
 
   // condition rules.
