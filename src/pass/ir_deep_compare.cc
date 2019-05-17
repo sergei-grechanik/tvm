@@ -195,7 +195,11 @@ class IRDeepCompare :
     const Variable* rhs = other.as<Variable>();
     auto it = vmap_.find(op);
     if (it != vmap_.end()) op = it->second;
-    if (op < rhs) {
+    if (op->name_hint < rhs->name_hint) {
+      order_ = -1;
+    } else if (op->name_hint > rhs->name_hint) {
+      order_ = +1;
+    } else if (op < rhs) {
       order_ = -1;
     } else if (op > rhs) {
       order_ = +1;
