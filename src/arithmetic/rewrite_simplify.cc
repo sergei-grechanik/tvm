@@ -1373,6 +1373,21 @@ Mutate_(const Call* op, const Expr& self) {
   return ret;
 }
 
+Expr RewriteSimplifier::Impl::
+Mutate_(const Cast* op, const Expr& self) {
+  Expr ret = IRMutator::Mutate_(op, self);
+  op = ret.as<Cast>();
+  // 0 and 1 are very common, useful for simplification, and are representable by every type
+  // we currently have in tvm
+  if (is_const_value(op->value, 0)) {
+    return make_const(op->type, 0);
+  }
+  if (is_const_value(op->value, 1)) {
+    return make_const(op->type, 1);
+  }
+  return ret;
+}
+
 Expr RewriteSimplifier::operator()(const Expr& expr) {
   // Run simplification in post order
   Expr res = expr;
