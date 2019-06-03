@@ -119,6 +119,27 @@ PrintSortedVarMapImpl<T> PrintSortedVarMap(const Map<Var, T>& varmap) {
   }
 #endif
 
+bool DoBadThings() {
+  static int step = 0;
+  static int bad_start = 0, bad_end = 0;
+  if (step == 0) {
+    if (getenv("TVM_ZE_BAD_START")) {
+      bad_start = std::atoi(getenv("TVM_ZE_BAD_START"));
+    }
+    if (getenv("TVM_ZE_BAD_END")) {
+      bad_end = std::atoi(getenv("TVM_ZE_BAD_END"));
+    }
+  }
+  ++step;
+  ZE_LOG("step", step);
+  if (step >= bad_start && step < bad_end) {
+    ZE_LOG("Doing bad things!", "");
+    return true;
+  } else {
+    return false;
+  }
+}
+
 int gcd(int a, int b) {
     if (a < b) std::swap(a, b);
     while (b != 0) {
