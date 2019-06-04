@@ -419,9 +419,10 @@ bool IsSumCombiner(const CommReducer& combiner, const Map<Var, Range>& vranges) 
     return ZE_LOG_RES(false);
   }
 
-  Expr should_be_zero =
-      SuperSimplify(combiner->result[0] - (combiner->lhs[0] + combiner->rhs[0]), vranges);
-  return ZE_LOG_RES(is_const_value(should_be_zero, 0));
+  Expr combiner_result = SuperSimplify(combiner->result[0], vranges);
+
+  return ZE_LOG_RES(Equal(combiner_result, combiner->lhs[0] + combiner->rhs[0]) ||
+                    Equal(combiner_result, combiner->rhs[0] + combiner->lhs[0]));
 }
 
 // Return true if zero may be factored out of a reduction with this combiner.
@@ -2493,10 +2494,19 @@ TVM_STATIC_IR_FUNCTOR(IRPrinter, vtable)
     Type type = d->variables.empty() ? Int(32) : d->ranges[d->variables[0]]->extent.type();
     Expr volume = make_const(type, 1);
     for (const auto& v : d->variables) {
-      volume *= d->ranges[v]->extent;
+      if (d->ranges.count(v)) {
+        volume *= d->ranges[v]->extent;
+      } else {
+        volume = Expr();
+        return;
+      }
     }
-    p->stream << "Domain(box_volume=" << volume
-              << ", variables=" << d->variables
+    if (volume.get()) {
+      p->stream << "Domain(box_volume=" << volume;
+    } else {
+      p->stream << "Domain(box_volume=inf";
+    }
+    p->stream << ", variables=" << d->variables
               << ", conditions=" << d->conditions
               << ", ranges=" << PrintSortedVarMap(d->ranges) << ")";
   });
