@@ -82,7 +82,8 @@ def check_bruteforce(bool_expr, vranges, cond=None):
     if not np.all(res):
         indices = list(np.argwhere(res == 0)[0])
         counterex = [(str(v), i + r.min) for (v, r), i in zip(vranges.items(), indices)]
-        counterex = ", ".join([v + " = " + str(i) for v, i in sorted(counterex)])
+        counterex = sorted(counterex, key=lambda x: x[0])
+        counterex = ", ".join([v + " = " + str(i) for v, i in counterex])
         raise AssertionError("Expression {}\nis not true on {}\n"
                              "Counterexample: {}"
                              .format(tvm.ir_pass.CanonicalSimplify(bool_expr), vranges, counterex))
@@ -439,12 +440,13 @@ def test_simplify_domain():
         new_reduction = SimplifyReductionDomain(reduction, vranges)
         check_bruteforce(reduction == new_reduction, vranges)
 
-        vol = np.prod([domain_tr.new_domain.ranges[v].extent.value
-                       for v in domain_tr.new_domain.variables])
-        if vol != volume:
-            raise AssertionError("New volume is {} != {}\n"
-                                 "Old domain {}\nNew domain {}"
-                                 .format(vol, volume, domain, domain_tr.new_domain))
+        if volume is not None:
+            vol = np.prod([domain_tr.new_domain.ranges[v].extent.value
+                           for v in domain_tr.new_domain.variables])
+            if vol != volume:
+                raise AssertionError("New volume is {} != {}\n"
+                                     "Old domain {}\nNew domain {}"
+                                     .format(vol, volume, domain, domain_tr.new_domain))
 
     k = tvm.reduce_axis((0, 5), name="k")
     l = tvm.reduce_axis((0, 5), name="l")
@@ -503,6 +505,38 @@ def test_simplify_domain():
     k = tvm.reduce_axis((0, 10), name="k")
     l = tvm.reduce_axis((0, 10), name="l")
     _check(all((l + k)%3 <= 1, (l + k)/3 <= 2), [l, k], 48)
+
+    # Some real-life examples (check only correctness)
+    # 6400 -> 2916
+    jac_i3 = tvm.reduce_axis((0, 10), name="jac_i3")
+    jac_i0 = tvm.reduce_axis((0, 1), name="jac_i0")
+    xx = tvm.reduce_axis((0, 4), name="xx")
+    yy = tvm.reduce_axis((0, 4), name="yy")
+    jac_i2 = tvm.reduce_axis((0, 10), name="jac_i2")
+    ff = tvm.reduce_axis((0, 2), name="ff")
+    jac_i1 = tvm.reduce_axis((0, 2), name="jac_i1")
+    nn = tvm.reduce_axis((0, 1), name="nn")
+    _check(all(jac_i3 <= xx*2 + 2, jac_i2 <= yy*2 + 2, yy*2 <= jac_i2, xx*2 <= jac_i3),
+           [nn, ff, yy, xx, jac_i0, jac_i1, jac_i2, jac_i3],
+           None)
+
+    # 32 -> 8
+    n1_k1 = tvm.reduce_axis((0, 2), name="n1_k1")
+    n0 = tvm.reduce_axis((0, 1), name="n0")
+    n2_k2 = tvm.reduce_axis((0, 4), name="n2_k2")
+    n3_k3 = tvm.reduce_axis((0, 4), name="n3_k3")
+    ax3 = tvm.var("ax3")
+    ax2 = tvm.var("ax2")
+    ax1 = tvm.var("ax1")
+    ax0 = tvm.var("ax0")
+    _check(all(ax3 <= n3_k3*2 + 2, ax2 <= n2_k2*2 + 2, n3_k3*2 <= ax3, n2_k2*2 <= ax2),
+           [n0, n1_k1, n2_k2, n3_k3],
+           None,
+           {ax3: tvm.Range(0, 10),
+            ax2: tvm.Range(0, 10),
+            ax1: tvm.Range(0, 2),
+            ax0: tvm.Range(0, 1)})
+
 
 def test_extract_as_tensor_maybe():
     def _check(shape, fcompute, volume=None, vranges={}):
