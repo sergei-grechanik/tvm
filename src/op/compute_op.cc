@@ -220,7 +220,11 @@ void ComputeOpNode::PropBoundToInputs(
       if (t->op.defined() && out_dom_map->count(t)) {
         TensorDom& dom = out_dom_map->at(t);
         for (size_t i = 0; i < t.ndim(); ++i) {
-          dom.data[i].push_back(EvalSet(call->args[i], dom_map));
+          // We assume that the value of the argument cannot be out of bounds (otherwise it is
+          // undefined behaviour), so we can intersect the estimated set of the argument with the
+          // range expected by the tensor.
+          IntSet shape_intset = IntSet::interval(make_zero(t->shape[i].type()), t->shape[i] - 1);
+          dom.data[i].push_back(arith::Intersect({EvalSet(call->args[i], dom_map), shape_intset}));
         }
       }
     }
