@@ -145,11 +145,26 @@ Expr CanonicalSimplify(Expr expr, Map<Var, Range> vrange) {
 }
 
 Expr Simplify(Expr expr, Map<Var, Range> vrange) {
-  arith::Analyzer analyzer;
-  for (auto kv : vrange) {
-    analyzer.Bind(kv.first, kv.second);
+  // For some reason no simplifier can detect that there is only one value of the variable
+  std::unordered_map<const Variable*, Expr> vmap;
+  for (const auto& var_range : vrange) {
+    if (is_const_int(var_range.second->extent, 1)) {
+      vmap[var_range.first.get()] = var_range.second->min;
+    }
   }
-  return analyzer.canonical_simplify(expr);
+  if (!vmap.empty()) {
+    expr = Substitute(expr, vmap);
+  }
+
+  arith::Analyzer an;
+  for (const auto& var_range : vrange) {
+    an.Bind(var_range.first, var_range.second);
+  }
+
+  Expr res = an.canonical_simplify(expr);
+  res = an.rewrite_simplify(res);
+  res = an.canonical_simplify(res);
+  return res;
 }
 
 Stmt Simplify(Stmt stmt, Map<Var, Range> vrange) {
