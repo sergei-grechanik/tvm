@@ -28,8 +28,19 @@
 namespace tvm {
 namespace ir {
 
-using HalideIR::Internal::gcd;
-using HalideIR::Internal::lcm;
+int gcd(int a, int b) {
+    if (a < b) std::swap(a, b);
+    while (b != 0) {
+        int64_t tmp = b;
+        b = a % b;
+        a = tmp;
+    }
+    return a;
+}
+
+int lcm(int a, int b) {
+    return (a*b)/gcd(a, b);
+}
 
 struct ExprLess {
     bool operator()(const Expr& l, const Expr& r) const {
