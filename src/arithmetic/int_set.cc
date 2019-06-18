@@ -222,10 +222,10 @@ inline IntervalSet Combine<ir::Div>(Analyzer* analyzer,
   return IntervalSet::Everything();
 }
 
-template<>
-inline IntervalSet Combine<ir::Mod>(Analyzer* analyzer,
-                                    IntervalSet a,
-                                    IntervalSet b) {
+inline IntervalSet CombineMod(Analyzer* analyzer,
+                              IntervalSet a,
+                              IntervalSet b,
+                              const Expr& a_expr) {
   if (a->IsSinglePoint() && b->IsSinglePoint()) {
     return IntervalSet::SinglePoint(truncmod(a->min_value, b->min_value));
   }
@@ -241,7 +241,12 @@ inline IntervalSet Combine<ir::Mod>(Analyzer* analyzer,
     // The logic below assumes a is non-negative, which usually
     // is the case of our application.
     // TODO(tqchen): add bound constraints for a.
-    if (analyzer->CanProveGreaterEqual(divisor, 0)) {
+    if (analyzer->CanProveGreaterEqual(divisor, 0) &&
+        analyzer->CanProveGreaterEqual(a->min_value, 0)) {
+      if (!analyzer->CanProveGreaterEqual(a->min_value, 0)) {
+        LOG(WARNING) << "ATTENTION! The expr " << a_expr << " is assumed to be non-negative."
+                     << " If this assumption is wrong, incorrect code may be generated!";
+      }
       return IntervalSet(make_zero(divisor.type()), divisor - 1);
     } else {
       Expr bound = abs(divisor) - 1;
@@ -525,6 +530,15 @@ class IntervalSetEvaluator :
       return IntervalSet::SinglePoint(GetRef<Expr>(op));
     }
     return Combine<T>(analyzer_, a, b);
+  }
+
+  inline IntervalSet VisitBinaryExpr_(const ir::Mod* op) {
+    IntervalSet a = this->Eval(op->a);
+    IntervalSet b = this->Eval(op->b);
+    if (MatchPoint(a, op->a) && MatchPoint(b, op->b)) {
+      return IntervalSet::SinglePoint(GetRef<Expr>(op));
+    }
+    return CombineMod(analyzer_, a, b, op->a);
   }
 
   // recursive depth
