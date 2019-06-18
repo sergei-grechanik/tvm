@@ -637,6 +637,28 @@ class FactorOutAtomicFormulasFunctor
   result_type VisitExpr_(const GE*, const Expr& e) final { return Atomic_(e); }
   result_type VisitExpr_(const GT*, const Expr& e) final { return Atomic_(e); }
 
+  result_type VisitExpr_(const Select* op, const Expr& e) final {
+    // Select can be rewritten through other logical ops
+    Expr expr = (op->condition && op->true_value) || (!op->condition && op->false_value);
+    return VisitExpr(expr, expr);
+  }
+
+  result_type VisitExpr_(const Not* op, const Expr& e) final {
+    // Not should be moved down
+    if (const Or* or_expr = op->a.as<Or>()) {
+      Expr expr = !or_expr->a && !or_expr->b;
+      return VisitExpr(expr, expr);
+    } else if (const And* and_expr = op->a.as<And>()) {
+      Expr expr = !and_expr->a || !and_expr->b;
+      return VisitExpr(expr, expr);
+    } if (const Select* sel_expr = op->a.as<Select>()) {
+      Expr expr = ((!sel_expr->condition || !sel_expr->true_value) &&
+                   (sel_expr->condition || !sel_expr->false_value));
+      return VisitExpr(expr, expr);
+    }
+    return Atomic_(e);
+  }
+
   result_type VisitExpr_(const And* op, const Expr& e) final {
     auto res_a = VisitExpr(op->a, op->a);
     auto res_b = VisitExpr(op->b, op->b);
