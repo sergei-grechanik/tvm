@@ -82,5 +82,16 @@ bool Analyzer::CanProveGreaterEqual(const Expr& expr, int64_t lower_bound) {
   return false;
 }
 
+bool Analyzer::CanProve(const Expr& expr) {
+  if (const auto* ptr = expr.as<ir::UIntImm>()) {
+    return ptr->value != 0;
+  }
+  auto res = this->rewrite_simplify(expr);
+  if (const auto* ptr = res.as<ir::UIntImm>()) {
+    return ptr->value != 0;
+  }
+  return false;
+}
+
 }  // namespace arith
 }  // namespace tvm

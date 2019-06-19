@@ -690,6 +690,9 @@ Mutate_(const Mod* op, const Expr& self) {
       if (mod->coeff % c1val == 0 &&
           CanProveGreaterEqual(x.Eval(), 0)) {
         return (mod->base % c1).Eval();
+      } else if (mod->coeff % c1val == 0 &&
+                 mod->base % c1val == 0) {
+        return make_zero(ret.type());
       }
     }
   }

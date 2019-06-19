@@ -147,7 +147,7 @@ class BoundDeducer: public IRVisitor {
     }
 
     // always use relax bound
-    bool divided = can_prove(result % operand == 0);
+    bool divided = analyzer_.CanProve(result % operand == 0);
     result = result / operand;
     // since system will round down when not divided
     // eg. 2/4 -> 0; -2/4 -> -1
@@ -180,6 +180,8 @@ class BoundDeducer: public IRVisitor {
   ExprIntSetMap expr_map_;
   std::vector<const Node*> path_;
   size_t iter_{0};
+  // internal analzyer
+  Analyzer analyzer_;
 };
 
 class BoundDeduceInputChecker: public IRVisitor {
