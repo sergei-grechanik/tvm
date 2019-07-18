@@ -22,7 +22,6 @@
 #include <unordered_set>
 #include <tuple>
 
-#include "arithmetic/ModulusRemainder.h"
 #include "../op/op_util.h"
 
 // Uncomment this line to make zero elimination very verbose
