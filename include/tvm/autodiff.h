@@ -63,7 +63,7 @@ using FDiffBuildingBlock = std::function<Tensor(const Tensor& output,
  * \param var The variable to differentiate with respect to.
  * \return The expression for the derivative.
  */
-EXPORT Expr Derivative(const Expr& expr, const VarExpr& var);
+TVM_DLL Expr Derivative(const Expr& expr, const VarExpr& var);
 
 /*!
  * \brief Get the tensor representing the Jacobian of the output with respect to the input.
@@ -77,7 +77,7 @@ EXPORT Expr Derivative(const Expr& expr, const VarExpr& var);
  * \param optimize Whether to perform optimizations like lifting of nonzeroness conditions.
  * \return The tensor representing the Jacobian of shape `output.shape + input.shape`.
  */
-EXPORT Tensor Jacobian(const Tensor& output, const Tensor& input, bool optimize = true);
+TVM_DLL Tensor Jacobian(const Tensor& output, const Tensor& input, bool optimize = true);
 
 /*!
  * \brief The building block for reverse-mode AD.
@@ -92,7 +92,7 @@ EXPORT Tensor Jacobian(const Tensor& output, const Tensor& input, bool optimize 
  * \param head The adjoint of \p output. Must be of shape `prefix + output.shape`
  * \return The tensor representing the adjoint of \p input of shape `prefix + input.shape`.
  */
-EXPORT Tensor DiffBuildingBlock(const Tensor& output, const Tensor& input, const Tensor& head);
+TVM_DLL Tensor DiffBuildingBlock(const Tensor& output, const Tensor& input, const Tensor& head);
 
 /*!
  * \brief Perform reverse mode automatic differentiation.
@@ -121,7 +121,7 @@ EXPORT Tensor DiffBuildingBlock(const Tensor& output, const Tensor& input, const
  *         - `adjoint_summands` A map from tensors to maps from parent tensors to individual
  *            summands of the adjoint.
  */
-EXPORT DifferentiationResult Differentiate(
+TVM_DLL DifferentiationResult Differentiate(
     const Tensor& output,
     const Array<Tensor>& inputs = Array<Tensor>(),
     const Tensor& head = Tensor(),
