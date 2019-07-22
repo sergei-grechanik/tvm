@@ -196,11 +196,11 @@ void AutogeneratePrimalGradientForAll(int plevel = 5) {
   }
 }
 
-TVM_REGISTER_API("relay._ir_pass.AutogeneratePrimalGradient")
+TVM_REGISTER_API("relay._base.AutogeneratePrimalGradient")
   .set_body([](tvm::TVMArgs args,  tvm::TVMRetValue *ret) {
       AutogeneratePrimalGradient(args[0]);
     });
-TVM_REGISTER_API("relay._ir_pass.AutogeneratePrimalGradientForAll")
+TVM_REGISTER_API("relay._base.AutogeneratePrimalGradientForAll")
   .set_body([](tvm::TVMArgs args,  tvm::TVMRetValue *ret) {
       AutogeneratePrimalGradientForAll();
     });
