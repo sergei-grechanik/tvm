@@ -47,6 +47,7 @@ std::string PrintTensorsRecursively(const Array<Tensor>& tensors) {
   while (!unprocessed.empty()) {
     Tensor cur = unprocessed.back();
     unprocessed.pop_back();
+    if (processed.count(cur) > 0) continue;
     processed.insert(cur);
 
     oss << "tensor " << PrintTensorName(cur) << " : " << cur->dtype << " " << cur->shape << "\n";
@@ -55,9 +56,7 @@ std::string PrintTensorsRecursively(const Array<Tensor>& tensors) {
       Expr body = comp->body[cur->value_index];
 
       for (const Tensor& t : comp->InputTensors()) {
-        if (processed.count(t) == 0) {
-          unprocessed.push_back(t);
-        }
+        unprocessed.push_back(t);
       }
 
       if (const Reduce* red = body.as<Reduce>()) {
