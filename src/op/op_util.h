@@ -120,6 +120,23 @@ ir::ForType IterVarTypeToForType(IterVarType iter_type);
 Expr CloneReduction(const Expr& expr);
 
 /*!
+ * \brief Create a compute op from expressions. If the expressions contain a single reduction,
+ *  its body will be correctly duplicated if it is a multi-valued reduction.
+ *
+ * \param exprs The expr which will be the tensor's body.
+ * \param axis The input variables with ranges.
+ * \param name The operation's name.
+ * \param tag The operation's tag.
+ * \param attrs The operation's attrs.
+ * \param clone_axis Whether to clone the given axis and perform substitution.
+ * \return A tensor.
+ */
+Operation ComputeOpFromExprs(const Array<Expr>& exprs, const Array<IterVar>& axis,
+                             const std::string& name, const std::string& tag,
+                             const Map<std::string, NodeRef>& attrs,
+                             bool clone_axis = true);
+
+/*!
  * \brief Create a tensor from an expression. The expression may be a reduction, in which
  *  case its body will be correctly duplicated if it is a multi-valued reduction.
  *

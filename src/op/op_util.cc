@@ -312,36 +312,45 @@ Expr CloneReduction(const Expr& expr) {
   }
 }
 
-Tensor TensorFromExpr(const Expr& expr, const Array<IterVar>& axis,
-                      const std::string& name, const std::string& tag,
-                      const Map<std::string, NodeRef>& attrs,
-                      bool clone_axis) {
+Operation ComputeOpFromExprs(const Array<Expr>& exprs, const Array<IterVar>& axis,
+                             const std::string& name, const std::string& tag,
+                             const Map<std::string, NodeRef>& attrs,
+                             bool clone_axis) {
   if (clone_axis) {
     Array<IterVar> new_axis = axis;
     Map<Var, Expr> vmap;
     std::tie(new_axis, vmap) = CloneIterVars(axis);
-    Expr new_expr = ir::Substitute(CloneReduction(expr), vmap);
-    return TensorFromExpr(new_expr, new_axis, name, tag, attrs, false);
+    Array<Expr> new_exprs;
+    for (const Expr& e : exprs) {
+      new_exprs.push_back(ir::Substitute(CloneReduction(e), vmap));
+    }
+    return ComputeOpFromExprs(new_exprs, new_axis, name, tag, attrs, false);
   }
 
-  Array<Expr> new_bodies;
-  int new_value_index = 0;
+  Array<Expr> new_exprs;
 
-  // If this is a reduction then we have to clone its body
-  // TODO: And probably we have to clone it with new reduction axes
-  if (const Reduce* red = expr.as<Reduce>()) {
-    new_value_index = red->value_index;
-
+  // If this is a reduction then we have to replicate it
+  if (const Reduce* red = exprs[0].as<Reduce>()) {
     for (size_t i = 0; i < red->source.size(); ++i) {
       Expr ith_red = Reduce::make(red->combiner, red->source, red->axis, red->condition, i);
-      new_bodies.push_back(ith_red);
+      new_exprs.push_back(ith_red);
     }
   } else {
-    new_value_index = 0;
-    new_bodies.push_back(expr);
+    new_exprs = exprs;
   }
 
-  return ComputeOpNode::make(name, tag, attrs, axis, new_bodies).output(new_value_index);
+  return ComputeOpNode::make(name, tag, attrs, axis, new_exprs);
+}
+
+Tensor TensorFromExpr(const Expr& expr, const Array<IterVar>& axis,
+                      const std::string& name, const std::string& tag,
+                      const Map<std::string, NodeRef>& attrs,
+                      bool clone_axis) {
+  int new_value_index = 0;
+  if (const Reduce* red = expr.as<Reduce>()) {
+    new_value_index = red->value_index;
+  }
+  return ComputeOpFromExprs({expr}, axis, name, tag, attrs, clone_axis).output(new_value_index);
 }
 
 Tensor TransformBody(const Tensor& tensor,

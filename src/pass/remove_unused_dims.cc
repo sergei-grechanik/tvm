@@ -37,14 +37,13 @@ namespace ir {
 class RemoveUnusedDimsMutator : public IRMutator {
  public:
   explicit RemoveUnusedDimsMutator(
-                std::unordered_map<Tensor, std::pair<Tensor, std::vector<int>>>* transformed)
+                std::unordered_map<Operation, std::pair<Operation, std::vector<int>>>* transformed)
       : transformed_(transformed) {}
 
   Expr Mutate_(const Call* call, const Expr& e) {
     if (call->call_type == Call::CallType::Halide) {
       if (const ComputeOpNode* op = call->func.as<ComputeOpNode>()) {
-        Tensor callee = GetRef<Operation>(op).output(call->value_index);
-        auto callee_it = transformed_->find(callee);
+        auto callee_it = transformed_->find(GetRef<Operation>(op));
         if (callee_it != transformed_->end()) {
           if (callee_it->second.first != callee_it->first ||
               callee_it->second.second.size() != call->args.size()) {
@@ -52,9 +51,9 @@ class RemoveUnusedDimsMutator : public IRMutator {
             for (int index : callee_it->second.second) {
               new_args.push_back(Mutate(call->args[index]));
             }
-            Tensor new_callee = callee_it->second.first;
+            Operation new_callee = callee_it->second.first;
             return Call::make(call->type, call->name, new_args, call->call_type,
-                              new_callee->op, new_callee->value_index);
+                              new_callee, call->value_index);
           }
         }
       }
@@ -65,67 +64,88 @@ class RemoveUnusedDimsMutator : public IRMutator {
   }
 
  private:
-  std::unordered_map<Tensor, std::pair<Tensor, std::vector<int>>>* transformed_;
+  std::unordered_map<Operation, std::pair<Operation, std::vector<int>>>* transformed_;
 };
 
 void RemoveUnusedDimsRecursivelyImpl(
-        Tensor tensor,
-        std::unordered_map<Tensor, Tensor>* semitransformed,
-        std::unordered_map<Tensor, std::pair<Tensor, std::vector<int>>>* transformed) {
-  if (semitransformed->count(tensor)) {
+        Operation oper,
+        std::unordered_map<Operation, Operation>* semitransformed,
+        std::unordered_map<Operation, std::pair<Operation, std::vector<int>>>* transformed) {
+  if (semitransformed->count(oper)) {
     return;
   }
 
-  for (const Tensor& subtensor : tensor->op->InputTensors()) {
-    RemoveUnusedDimsRecursivelyImpl(subtensor, semitransformed, transformed);
+  for (const Tensor& subtensor : oper->InputTensors()) {
+    RemoveUnusedDimsRecursivelyImpl(subtensor->op, semitransformed, transformed);
   }
 
-  if (const ComputeOpNode* op = tensor->op.as<ComputeOpNode>()) {
+  if (const ComputeOpNode* op = oper.as<ComputeOpNode>()) {
     RemoveUnusedDimsMutator mut(transformed);
-    Expr new_body = mut.Mutate(op->body[tensor->value_index]);
-
-    if (new_body.same_as(op->body[tensor->value_index])) {
-      // If the body didn't change then we can use the same tensor
-      (*semitransformed)[tensor] = tensor;
+    Array<Expr> new_body;
+    bool changed = false;
+    if (op->body[0].as<Reduce>()) {
+      Expr e = mut.Mutate(op->body[0]);
+      changed = changed || !e.same_as(op->body[0]);
+      new_body.push_back(e);
     } else {
-      (*semitransformed)[tensor] =
-        op::TensorFromExpr(new_body, op->axis, op->name, op->tag, op->attrs);
+      for (const Expr& b : op->body) {
+        Expr e = mut.Mutate(b);
+        changed = changed || !e.same_as(b);
+        new_body.push_back(e);
+      }
+    }
+
+    if (!changed) {
+      // If the body didn't change then we can use the same operation
+      (*semitransformed)[oper] = oper;
+    } else {
+      (*semitransformed)[oper] =
+        op::ComputeOpFromExprs(new_body, op->axis, op->name, op->tag, op->attrs);
     }
 
     Array<IterVar> new_axis;
     std::vector<int> retained_dims;
     for (size_t i = 0; i < op->axis.size(); ++i) {
-      if (ExprUseVar(new_body, op->axis[i]->var)) {
+      bool used = false;
+      for (const Expr e : new_body) {
+        used = used || ExprUseVar(e, op->axis[i]->var);
+      }
+      if (used) {
         new_axis.push_back(op->axis[i]);
         retained_dims.push_back(i);
       }
     }
 
-    if (new_body.same_as(op->body[tensor->value_index]) && new_axis.size() == op->axis.size()) {
-      (*transformed)[tensor] = make_pair(tensor, retained_dims);
+    if (!changed && new_axis.size() == op->axis.size()) {
+      (*transformed)[oper] = make_pair(oper, retained_dims);
     } else {
-      (*transformed)[tensor] =
-        make_pair(op::TensorFromExpr(new_body, new_axis, op->name, op->tag, op->attrs),
+      (*transformed)[oper] =
+        make_pair(op::ComputeOpFromExprs(new_body, new_axis, op->name, op->tag, op->attrs),
                   retained_dims);
     }
   } else {
-    Operation new_op = tensor->op->ReplaceInputs(tensor->op, *semitransformed);
-    if (new_op.same_as(tensor->op)) {
-      (*semitransformed)[tensor] = tensor;
+    std::unordered_map<Tensor, Tensor> subst;
+    for (const Tensor& inp : oper->InputTensors()) {
+      if (semitransformed->count(inp->op)) {
+        subst[inp] = (*semitransformed)[inp->op].output(inp->value_index);
+      }
+    }
+    Operation new_op = oper->ReplaceInputs(oper, subst);
+    if (new_op.same_as(oper)) {
+      (*semitransformed)[oper] = oper;
     } else {
-      (*semitransformed)[tensor] =
-        TensorNode::make(tensor->shape, tensor->dtype, new_op, tensor->value_index);
+      (*semitransformed)[oper] = new_op;
     }
   }
 }
 
 Array<Tensor> RemoveUnusedDimsRecursively(const Array<Tensor> tensors) {
-  std::unordered_map<Tensor, Tensor> semitransformed;
-  std::unordered_map<Tensor, std::pair<Tensor, std::vector<int>>> transformed;
+  std::unordered_map<Operation, Operation> semitransformed;
+  std::unordered_map<Operation, std::pair<Operation, std::vector<int>>> transformed;
   Array<Tensor> res;
   for (const Tensor& t : tensors) {
-    RemoveUnusedDimsRecursivelyImpl(t, &semitransformed, &transformed);
-    res.push_back(semitransformed[t]);
+    RemoveUnusedDimsRecursivelyImpl(t->op, &semitransformed, &transformed);
+    res.push_back(semitransformed[t->op].output(t->value_index));
   }
   return res;
 }
