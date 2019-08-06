@@ -118,11 +118,6 @@ TVM_DLL DomainTransformation EmptyDomainTransformation(const Domain& domain);
 TVM_DLL DomainTransformation IdDomainTransformation(const Domain& domain);
 
 /*!
- * \brief Clone the reduction by cloning its iteration variables.
- */
-TVM_DLL Expr CloneReduction(const Expr& expr);
-
-/*!
  * \brief Check if the given combiner represents summation.
  */
 TVM_DLL bool IsSumCombiner(const CommReducer& combiner,

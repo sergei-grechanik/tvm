@@ -585,6 +585,15 @@ bool VerifyMemory(LoweredFunc func, int device_type);
 bool VerifyGPUCode(Stmt stmt,
                    Map<std::string, Expr> constraints);
 
+/*!
+ * \brief Rebuild the DAG of tensors in such a way that there is no unused dimensions in tensors.
+ *
+ *  Note that the dimensions of the `tensors` themselves are left intact.
+ *
+ * \param tensors The array of tensors defining the DAG to transform.
+ * \return Transformed tensors.
+ */
+TVM_DLL Array<Tensor> RemoveUnusedDimsRecursively(const Array<Tensor> tensors);
 
 }  // namespace ir
 }  // namespace tvm

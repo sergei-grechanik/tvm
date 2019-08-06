@@ -378,6 +378,14 @@ TVM_DLL IterVar thread_axis(Range dom, std::string tag);
  */
 TVM_DLL IterVar reduce_axis(Range dom, std::string name = "rv");
 
+/*!
+ * \brief Clone iter vars and return both the new vars and the substitution from old to new.
+ *
+ * \param vars The original iter vars.
+ * \return A pair containing the array of new iter vars and the map from old vars to new ones.
+ */
+TVM_DLL std::pair<Array<IterVar>, Map<Var, Expr>> CloneIterVars(const Array<IterVar>& vars);
+
 using Domain = Array<Range>;
 
 /*!

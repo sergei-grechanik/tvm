@@ -294,13 +294,41 @@ ir::ForType IterVarTypeToForType(IterVarType iter_type) {
   }
 }
 
+Expr CloneReduction(const Expr& expr) {
+  if (const Reduce* red = expr.as<Reduce>()) {
+    Array<IterVar> new_axis;
+    Map<Var, Expr> vmap;
+    std::tie(new_axis, vmap) = CloneIterVars(red->axis);
+
+    Array<Expr> src_with_newaxis;
+    for (const auto& src : red->source) {
+      src_with_newaxis.push_back(ir::Substitute(src, vmap));
+    }
+
+    return Reduce::make(red->combiner, src_with_newaxis,
+        new_axis, ir::Substitute(red->condition, vmap), red->value_index);
+  } else {
+    return expr;
+  }
+}
+
 Tensor TensorFromExpr(const Expr& expr, const Array<IterVar>& axis,
                       const std::string& name, const std::string& tag,
-                      const Map<std::string, NodeRef>& attrs) {
+                      const Map<std::string, NodeRef>& attrs,
+                      bool clone_axis) {
+  if (clone_axis) {
+    Array<IterVar> new_axis = axis;
+    Map<Var, Expr> vmap;
+    std::tie(new_axis, vmap) = CloneIterVars(axis);
+    Expr new_expr = ir::Substitute(CloneReduction(expr), vmap);
+    return TensorFromExpr(new_expr, new_axis, name, tag, attrs, false);
+  }
+
   Array<Expr> new_bodies;
   int new_value_index = 0;
 
   // If this is a reduction then we have to clone its body
+  // TODO: And probably we have to clone it with new reduction axes
   if (const Reduce* red = expr.as<Reduce>()) {
     new_value_index = red->value_index;
 
