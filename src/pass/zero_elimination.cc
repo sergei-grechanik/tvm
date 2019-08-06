@@ -351,40 +351,6 @@ DomainTransformation IdDomainTransformation(const Domain& domain) {
   return DomainTransformationNode::make(domain, domain, new_to_old, new_to_old);
 }
 
-// Clone iter vars and return both the new vars and the substitution from old to new.
-std::pair<Array<IterVar>, std::unordered_map<const Variable*, Expr>> CloneIterVars(
-    const Array<IterVar>& vars) {
-  Array<IterVar> new_vars;
-  std::unordered_map<const Variable*, Expr> vmap;
-  for (const IterVar& iv : vars) {
-    IterVar new_v =
-      IterVarNode::make(iv->dom, iv->var.copy_with_suffix(""),
-          iv->iter_type, iv->thread_tag);
-    new_vars.push_back(new_v);
-    vmap[iv->var.get()] = new_v;
-  }
-  return std::make_pair(std::move(new_vars), std::move(vmap));
-}
-
-// Clone reduction by cloning the axis variables.
-Expr CloneReduction(const Expr& expr) {
-  if (const Reduce* red = expr.as<Reduce>()) {
-    Array<IterVar> new_axis;
-    std::unordered_map<const Variable*, Expr> vmap;
-    std::tie(new_axis, vmap) = CloneIterVars(red->axis);
-
-    Array<Expr> src_with_newaxis;
-    for (const auto& src : red->source) {
-      src_with_newaxis.push_back(Substitute(src, vmap));
-    }
-
-    return Reduce::make(red->combiner, src_with_newaxis,
-        new_axis, Substitute(red->condition, vmap), red->value_index);
-  } else {
-    return expr;
-  }
-}
-
 // Convert an array of itervars to an array of inequalities
 Array<Expr> IterVarsToInequalities(const Array<IterVar>& itervars) {
   Array<Expr> res;
@@ -483,7 +449,7 @@ Expr InlineThisCall(const Expr& expr) {
                               op_comp->body[op->value_index]);
         if (const ir::Evaluate* ev = inlined.as<ir::Evaluate>()) {
           // If it is a reduction, clone it
-          return ZE_LOG_RES(CloneReduction(ev->value));
+          return ZE_LOG_RES(op::CloneReduction(ev->value));
         }
       }
     }

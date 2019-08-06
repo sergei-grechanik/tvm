@@ -176,7 +176,7 @@ class JacobianMutator : public IRMutator {
 
     // We have to clone the reduction axes because otherwise the original expression
     // cannot be used together with the derivative (it will lead to errors during lowering)
-    Expr expr_with_new_axes = CloneReduction(e);
+    Expr expr_with_new_axes = op::CloneReduction(e);
     const Reduce* op = expr_with_new_axes.as<Reduce>();
 
     // New lhs and rhs variables of the new combiner consist of variables

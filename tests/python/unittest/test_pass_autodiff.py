@@ -77,6 +77,9 @@ def check_grad(out, inputs, args=[], in_range=(-10,10), perf=None, param_values=
     ones = topi.full_like(out, 1.0)
 
     grads = list(tvm.differentiate(out, inputs, ones))
+    # This is not done automatically by tvm.differentiate because it may lead to strange
+    # tensor shapes, however it is recommended to call it
+    grads = list(tvm.ir_pass.RemoveUnusedDimsRecursively(grads))
 
     if verbose:
         print("Gradients:\n")

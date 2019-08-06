@@ -112,6 +112,13 @@ IterVarType ForTypeToIterVarType(ir::ForType for_type);
  */
 ir::ForType IterVarTypeToForType(IterVarType iter_type);
 
+// TODO: Move these functions to some tensor_util or ir_util
+/*!
+ * \brief Clone reduction by cloning the axis variables.
+ * \param expr A reduction expr to clone. Non-reduction expressions are left intact.
+ */
+Expr CloneReduction(const Expr& expr);
+
 /*!
  * \brief Create a tensor from an expression. The expression may be a reduction, in which
  *  case its body will be correctly duplicated if it is a multi-valued reduction.
@@ -121,11 +128,13 @@ ir::ForType IterVarTypeToForType(IterVarType iter_type);
  * \param name The tensor's name.
  * \param tag The tensor's tag.
  * \param attrs The tensor's attrs.
+ * \param clone_axis Whether to clone the given axis and perform substitution.
  * \return A tensor.
  */
 Tensor TensorFromExpr(const Expr& expr, const Array<IterVar>& axis,
                       const std::string& name = "tensor", const std::string& tag = "",
-                      const Map<std::string, NodeRef>& attrs = {});
+                      const Map<std::string, NodeRef>& attrs = {},
+                      bool clone_axis = true);
 
 /*!
  * \brief Transform the body of a tensor if it is a compute tensor, otherwise return it

@@ -148,6 +148,19 @@ IterVar reduce_axis(Range dom, std::string name) {
       dom, Var(name), kCommReduce);
 }
 
+std::pair<Array<IterVar>, Map<Var, Expr>> CloneIterVars(const Array<IterVar>& vars) {
+  Array<IterVar> new_vars;
+  Map<Var, Expr> vmap;
+  for (const IterVar& iv : vars) {
+    IterVar new_v =
+      IterVarNode::make(iv->dom, iv->var.copy_with_suffix(""),
+          iv->iter_type, iv->thread_tag);
+    new_vars.push_back(new_v);
+    vmap.Set(iv->var, new_v->var);
+  }
+  return std::make_pair(std::move(new_vars), std::move(vmap));
+}
+
 void Dump(const NodeRef& n) {
   std::cerr << n << "\n";
 }
