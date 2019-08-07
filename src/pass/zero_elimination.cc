@@ -224,14 +224,14 @@ Expr SuperSimplify(Expr e, const Map<Var, Range>& vranges = Map<Var, Range>()) {
     an.Bind(var_range.first, var_range.second);
   }
 
-  ZE_LOG("VRANGES", vranges);
-  ZE_LOG("EXPR", e);
-  Expr res = an.canonical_simplify(e);
-  ZE_LOG("CAN", res);
+  // According to my experiments two best simplifications orders were can->rw and rw->can->rw,
+  // but rw->can->rw is better for a couple of cases.
+  // Note that we should end with rw because it factors multipliers out.
+  Expr res = e;
   res = an.rewrite_simplify(res);
-  ZE_LOG("RW", res);
   res = an.canonical_simplify(res);
-  ZE_LOG("CAN(RES)", res);
+  res = an.rewrite_simplify(res);
+
   return res;
 }
 
