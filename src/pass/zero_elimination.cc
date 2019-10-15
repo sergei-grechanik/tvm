@@ -1008,7 +1008,7 @@ class EliminateDivModMutator : public IRMutator {
     if (imm && imm->value != 0) {
       if (imm->value < 0) {
         // x % -c == x % c for truncated division
-        return Mutate(op->a % make_const(op->type, -imm->value));
+        return Mutate(truncmod(op->a, make_const(op->type, -imm->value)));
       }
 
       // Try to find the already existing variables for this expression
@@ -1022,11 +1022,11 @@ class EliminateDivModMutator : public IRMutator {
       if (auto var_pair_opt = AddNewVarPair(op->a, mutated_a, imm->value)) {
         return var_pair_opt.value().second;
       } else {
-        return mutated_a % op->b;
+        return truncmod(mutated_a, op->b);
       }
     }
 
-    return Mutate(op->a) % Mutate(op->b);
+    return truncmod(Mutate(op->a), Mutate(op->b));
   }
 
  private:
@@ -1051,8 +1051,8 @@ class EliminateDivModMutator : public IRMutator {
     }
 
     // Infer ranges for the expressions we want to replace with variables
-    Range div_range = EvalSet(mut / val_e, var_intsets).cover_range(Range());
-    Range mod_range = EvalSet(mut % val_e, var_intsets).cover_range(Range());
+    Range div_range = EvalSet(truncdiv(mut, val_e), var_intsets).cover_range(Range());
+    Range mod_range = EvalSet(truncmod(mut, val_e), var_intsets).cover_range(Range());
 
     // We don't want to add unbounded variables
     if (!div_range.get() || !mod_range.get()) {
@@ -1069,8 +1069,8 @@ class EliminateDivModMutator : public IRMutator {
     new_variables.push_back(mod);
 
     // Note that we have to perform substitution to mut because mut may contain new variables
-    substitution.Set(div, Substitute(mut, substitution) / val_e);
-    substitution.Set(mod, Substitute(mut, substitution) % val_e);
+    substitution.Set(div, truncdiv(Substitute(mut, substitution), val_e));
+    substitution.Set(mod, truncmod(Substitute(mut, substitution), val_e));
 
     ranges.Set(div, div_range);
     ranges.Set(mod, mod_range);
@@ -1505,7 +1505,7 @@ DomainTransformation SolveSystemOfEquations(const Domain& domain) {
     } else {
       // The diagonal element is non-zero. A solution exists only if the diagonal element
       // is a divisor of the rhs[j]
-      new_cond = (rhs[j] % std::abs(matrix[j][j]) == 0);
+      new_cond = (truncmod(rhs[j], std::abs(matrix[j][j])) == 0);
     }
     new_cond = SuperSimplify(new_cond, domain->ranges);
     if (is_const_int(new_cond, 0)) {
@@ -1970,7 +1970,7 @@ DomainTransformation DeskewDomain(const Domain& domain) {
           ZE_LOG_NL();
           ZE_LOG("Considering low", low);
           ZE_LOG("Considering upp", upp);
-          Expr diff_1 = SuperSimplify((upp - low) / bnd.coef, vranges);
+          Expr diff_1 = SuperSimplify(truncdiv(upp - low, bnd.coef), vranges);
           // Since diff may depend on some other variables, we compute its overapproximation
           Expr diff_over_1 = SuperSimplify(EvalSet(diff_1, new_var_intsets).max(), vranges);
 
@@ -1978,16 +1978,16 @@ DomainTransformation DeskewDomain(const Domain& domain) {
           // We use rounding-up division to compute it. Since we want to use a single formula
           // without selects in as many cases as possible, we try to prove conditions manually.
           Expr low_divided;
-          if (CanProve(low <= 0, vranges) || CanProve(low % bnd.coef == 0, vranges)) {
-            low_divided = low / bnd.coef;
+          if (CanProve(low <= 0, vranges) || CanProve(truncmod(low, bnd.coef) == 0, vranges)) {
+            low_divided = truncdiv(low, bnd.coef);
           } else if (CanProve(low > -bnd.coef, vranges)) {
-            low_divided = (low + bnd.coef - 1) / bnd.coef;
+            low_divided = truncdiv(low + bnd.coef - 1, bnd.coef);
           } else {
             ZE_LOG("The sign of low is unknown:", low);
             // We don't use the commented out rounding-up division here because it leads to
             // overly complex expressions. So we just use the ordinary division.
             // low_divided = (low + Select::make(low <= -bnd.coef, 0, bnd.coef - 1)) / bnd.coef;
-            low_divided = low / bnd.coef;
+            low_divided = truncdiv(low, bnd.coef);
             // However diff_1_over is not correct when we use the ordinary division, so increase it
             diff_1 = diff_1 + 1;
             diff_over_1 = diff_over_1 + 1;
@@ -1996,7 +1996,7 @@ DomainTransformation DeskewDomain(const Domain& domain) {
 
           // Compute another difference which may be more precise (or not). Note that we may want
           // to use flooring div here, but the ordinary division is ok for now.
-          Expr diff_2 = SuperSimplify(upp / bnd.coef - low_divided, vranges);
+          Expr diff_2 = SuperSimplify(truncdiv(upp, bnd.coef - low_divided), vranges);
           Expr diff_over_2 = SuperSimplify(EvalSet(diff_2, new_var_intsets).max(), vranges);
 
           ZE_LOG("Considering low_divided", low_divided);
