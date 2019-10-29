@@ -26,7 +26,7 @@ class DifferentiationResultNode : public Node {
   /*! \brief constructor */
   DifferentiationResultNode() {}
 
-  void VisitAttrs(AttrVisitor* v) final {
+  void VisitAttrs(AttrVisitor* v) {
     v->Visit("result", &result);
     v->Visit("adjoints", &adjoints);
     v->Visit("adjoint_summands", &adjoint_summands);
