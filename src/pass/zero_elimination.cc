@@ -12,6 +12,7 @@
 #include <tvm/ir_pass.h>
 #include <tvm/ir_visitor.h>
 #include <tvm/operation.h>
+#include <dmlc/optional.h>
 
 #include <algorithm>
 #include <map>
@@ -250,7 +251,7 @@ class ExprFreeVarsVisitor : public IRVisitor {
     if (const Variable* v = node.as<Variable>()) {
       if (!bound.count(v) && !free.count(v)) {
         free.insert(v);
-        free_array.push_back(Var(node.node_));
+        free_array.push_back(Downcast<Var>(node));
       }
     } else {
       IRVisitor::Visit(node);
@@ -2525,7 +2526,7 @@ TVM_REGISTER_NODE_TYPE(DomainTransformationNode);
 
 TVM_REGISTER_API("arith._make_Domain")
 .set_body([](TVMArgs args, TVMRetValue *ret) {
-    if (args[1].IsNodeType<Expr>()) {
+    if (args[1].IsObjectRef<Expr>()) {
       *ret = DomainNode::make(args[0], FactorOutAtomicFormulas(args[1]).to_array(), args[2]);
     } else {
       *ret = DomainNode::make(args[0], args[1], args[2]);
@@ -2582,7 +2583,7 @@ TVM_REGISTER_API("ir_pass.InlineTailCall")
 
 TVM_REGISTER_API("ir_pass.InlineTensors")
 .set_body([](TVMArgs args, TVMRetValue *ret) {
-    if (args[0].IsNodeType<Expr>()) {
+    if (args[0].IsObjectRef<Expr>()) {
       Expr e = args[0];
       if (args.size() == 1) {
         *ret = InlineTensors(e);
@@ -2591,7 +2592,7 @@ TVM_REGISTER_API("ir_pass.InlineTensors")
       } else if (args.size() >= 3) {
         *ret = InlineTensors(e, args[1], args[2]);
       }
-    } else if (args[0].IsNodeType<Tensor>()) {
+    } else if (args[0].IsObjectRef<Tensor>()) {
       Tensor t = args[0];
       if (args.size() == 1) {
         *ret = InlineTensors(t);

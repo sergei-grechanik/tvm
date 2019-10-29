@@ -38,7 +38,7 @@ class DomainNode : public Node {
   /*! \brief constructor */
   DomainNode() {}
 
-  void VisitAttrs(AttrVisitor* v) final {
+  void VisitAttrs(AttrVisitor* v) {
     v->Visit("variables", &variables);
     v->Visit("conditions", &conditions);
     v->Visit("ranges", &ranges);
@@ -70,7 +70,7 @@ class DomainTransformationNode : public Node {
   /*! \brief constructor */
   DomainTransformationNode() {}
 
-  void VisitAttrs(AttrVisitor* v) final {
+  void VisitAttrs(AttrVisitor* v) {
     v->Visit("new_domain", &new_domain);
     v->Visit("old_domain", &old_domain);
     v->Visit("new_to_old", &new_to_old);
@@ -90,7 +90,7 @@ class DomainTransformation : public NodeRef {
   DomainTransformation() {}
   explicit DomainTransformation(NodePtr<Node> n) : NodeRef(n) {}
   const DomainTransformationNode* operator->() const {
-    return static_cast<const DomainTransformationNode*>(node_.get());
+    return static_cast<const DomainTransformationNode*>(get());
   }
   using ContainerType = DomainTransformationNode;
 
