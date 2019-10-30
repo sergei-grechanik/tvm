@@ -552,6 +552,8 @@ class NonzeronessConditionFunctor
   result_type VisitExpr_(const Mul* op, const Expr& e) final { return BinOpMulLike_(op, e); }
   result_type VisitExpr_(const Div* op, const Expr& e) final { return BinOpDivLike_(op, e); }
   result_type VisitExpr_(const Mod* op, const Expr& e) final { return BinOpDivLike_(op, e); }
+  result_type VisitExpr_(const FloorDiv* op, const Expr& e) final { return BinOpDivLike_(op, e); }
+  result_type VisitExpr_(const FloorMod* op, const Expr& e) final { return BinOpDivLike_(op, e); }
   result_type VisitExpr_(const Min* op, const Expr& e) final { return BinOpAddLike_(op, e); }
   result_type VisitExpr_(const Max* op, const Expr& e) final { return BinOpAddLike_(op, e); }
 
@@ -968,6 +970,32 @@ struct EliminateDivModResult {
   Map<Var, Range> ranges;
 };
 
+// TODO: This is a duplicate of the same enum from canonical_simplify.cc, they should be merged
+enum DivMode {
+  /*! \brief Truncated division. */
+  kTruncDiv,
+  /*! \brief Floor division. */
+  kFloorDiv
+};
+
+inline Expr ModImpl(Expr a, Expr b, DivMode mode) {
+  if (mode == kTruncDiv) {
+    return truncmod(a, b);
+  } else {
+    CHECK_EQ(mode, kFloorDiv);
+    return floormod(a, b);
+  }
+}
+
+inline Expr DivImpl(Expr a, Expr b, DivMode mode) {
+  if (mode == kTruncDiv) {
+    return truncdiv(a, b);
+  } else {
+    CHECK_EQ(mode, kFloorDiv);
+    return floordiv(a, b);
+  }
+}
+
 class EliminateDivModMutator : public IRMutator {
  public:
   Map<Var, Expr> substitution;
@@ -983,25 +1011,25 @@ class EliminateDivModMutator : public IRMutator {
     if (imm && imm->value != 0) {
       if (imm->value < 0) {
         // x / -c == -(x/c) for truncated division
-        return make_zero(op->type) - Mutate(op->a / make_const(op->type, -imm->value));
+        return make_zero(op->type) - Mutate(truncdiv(op->a, make_const(op->type, -imm->value)));
       }
 
       // Try to find the already existing variables for this expression
-      auto it = expr_to_vars_.find({op->a, imm->value});
+      auto it = expr_to_vars_.find(std::make_tuple(kTruncDiv, op->a, imm->value));
       if (it != expr_to_vars_.end()) {
         return it->second.first;
       }
 
       // Otherwise recursively mutate the left hand side, and create new variables
       Expr mutated_a = Mutate(op->a);
-      if (auto var_pair_opt = AddNewVarPair(op->a, mutated_a, imm->value)) {
+      if (auto var_pair_opt = AddNewVarPair(op->a, mutated_a, imm->value, kTruncDiv)) {
         return var_pair_opt.value().first;
       } else {
-        return mutated_a / op->b;
+        return truncdiv(mutated_a, op->b);
       }
     }
 
-    return Mutate(op->a) / Mutate(op->b);
+    return truncdiv(Mutate(op->a), Mutate(op->b));
   }
 
   virtual Expr Mutate_(const Mod* op, const Expr& e) {
@@ -1013,14 +1041,14 @@ class EliminateDivModMutator : public IRMutator {
       }
 
       // Try to find the already existing variables for this expression
-      auto it = expr_to_vars_.find({op->a, imm->value});
+      auto it = expr_to_vars_.find(std::make_tuple(kTruncDiv, op->a, imm->value));
       if (it != expr_to_vars_.end()) {
         return it->second.second;
       }
 
       // Otherwise recursively mutate the left hand side, and create new variables
       Expr mutated_a = Mutate(op->a);
-      if (auto var_pair_opt = AddNewVarPair(op->a, mutated_a, imm->value)) {
+      if (auto var_pair_opt = AddNewVarPair(op->a, mutated_a, imm->value, kTruncDiv)) {
         return var_pair_opt.value().second;
       } else {
         return truncmod(mutated_a, op->b);
@@ -1030,13 +1058,69 @@ class EliminateDivModMutator : public IRMutator {
     return truncmod(Mutate(op->a), Mutate(op->b));
   }
 
+  virtual Expr Mutate_(const FloorDiv* op, const Expr& e) {
+    const IntImm* imm = op->b.as<IntImm>();
+    if (imm && imm->value != 0) {
+      if (imm->value < 0) {
+        // x / -c == (-x) / c for flooring division
+        return Mutate(floordiv(make_zero(op->type) - op->a, make_const(op->type, -imm->value)));
+      }
+
+      // Try to find the already existing variables for this expression
+      auto it = expr_to_vars_.find(std::make_tuple(kFloorDiv, op->a, imm->value));
+      if (it != expr_to_vars_.end()) {
+        return it->second.first;
+      }
+
+      // Otherwise recursively mutate the left hand side, and create new variables
+      Expr mutated_a = Mutate(op->a);
+      if (auto var_pair_opt = AddNewVarPair(op->a, mutated_a, imm->value, kFloorDiv)) {
+        return var_pair_opt.value().first;
+      } else {
+        return floordiv(mutated_a, op->b);
+      }
+    }
+
+    return floordiv(Mutate(op->a), Mutate(op->b));
+  }
+
+  virtual Expr Mutate_(const FloorMod* op, const Expr& e) {
+    const IntImm* imm = op->b.as<IntImm>();
+    if (imm && imm->value != 0) {
+      if (imm->value < 0) {
+        // x % -c == -(-x % c) for flooring division
+        return Mutate(make_zero(op->type) - floormod(make_zero(op->type) - op->a,
+                                                     make_const(op->type, -imm->value)));
+      }
+
+      // Try to find the already existing variables for this expression
+      auto it = expr_to_vars_.find(std::make_tuple(kFloorDiv, op->a, imm->value));
+      if (it != expr_to_vars_.end()) {
+        return it->second.second;
+      }
+
+      // Otherwise recursively mutate the left hand side, and create new variables
+      Expr mutated_a = Mutate(op->a);
+      if (auto var_pair_opt = AddNewVarPair(op->a, mutated_a, imm->value, kFloorDiv)) {
+        return var_pair_opt.value().second;
+      } else {
+        return floormod(mutated_a, op->b);
+      }
+    }
+
+    return floormod(Mutate(op->a), Mutate(op->b));
+  }
+
  private:
-  dmlc::optional<std::pair<Var, Var>> AddNewVarPair(const Expr& e, const Expr& mut, int64_t val) {
+  dmlc::optional<std::pair<Var, Var>> AddNewVarPair(const Expr& e,
+                                                    const Expr& mut,
+                                                    int64_t val,
+                                                    DivMode mode) {
     using tresult = dmlc::optional<std::pair<Var, Var>>;
 
     // Try to find the variables using the mutated expressions
     if (!e.same_as(mut)) {
-      auto it = expr_to_vars_.find({mut, val});
+      auto it = expr_to_vars_.find(std::make_tuple(mode, mut, val));
       if (it != expr_to_vars_.end()) {
         return tresult(it->second);
       }
@@ -1052,26 +1136,31 @@ class EliminateDivModMutator : public IRMutator {
     }
 
     // Infer ranges for the expressions we want to replace with variables
-    Range div_range = EvalSet(truncdiv(mut, val_e), var_intsets).cover_range(Range());
-    Range mod_range = EvalSet(truncmod(mut, val_e), var_intsets).cover_range(Range());
+    Range div_range = EvalSet(DivImpl(mut, val_e, mode), var_intsets).cover_range(Range());
+    Range mod_range = EvalSet(ModImpl(mut, val_e, mode), var_intsets).cover_range(Range());
 
     // We don't want to add unbounded variables
     if (!div_range.get() || !mod_range.get()) {
-      LOG(WARNING) << "EliminateDivMod: won't eliminate div or mod of expr " << e
+      LOG(WARNING) << "EliminateDivMod: won't eliminate " << DivImpl(e, val_e, mode)
+                   << "  because its bounds cannot be inferred";
+      return tresult();
+    }
+    if (!mod_range.get()) {
+      LOG(WARNING) << "EliminateDivMod: won't eliminate " << ModImpl(e, val_e, mode)
                    << "  because its bounds cannot be inferred";
       return tresult();
     }
 
     // Create new variables for the expressions
-    auto div = Var("div" + std::to_string(idx_), e.type());
-    auto mod = Var("mod" + std::to_string(idx_), e.type());
+    auto div = Var((mode == kTruncDiv ? "tdiv" : "fdiv") + std::to_string(idx_), e.type());
+    auto mod = Var((mode == kTruncDiv ? "tmod" : "fmod") + std::to_string(idx_), e.type());
 
     new_variables.push_back(div);
     new_variables.push_back(mod);
 
     // Note that we have to perform substitution to mut because mut may contain new variables
-    substitution.Set(div, truncdiv(Substitute(mut, substitution), val_e));
-    substitution.Set(mod, truncmod(Substitute(mut, substitution), val_e));
+    substitution.Set(div, DivImpl(Substitute(mut, substitution), val_e, mode));
+    substitution.Set(mod, ModImpl(Substitute(mut, substitution), val_e, mode));
 
     ranges.Set(div, div_range);
     ranges.Set(mod, mod_range);
@@ -1083,28 +1172,33 @@ class EliminateDivModMutator : public IRMutator {
       // Since we use the C/C++ definition of mod, there may be multiple values of `mod`
       // satisfying the added condition if the expr `e` may change its sign, so we
       // have to add another condition.
-      LOG(WARNING) << "EliminateDivMod: cannot fully eliminate div or mod of expr " << e
-                   << "  (probably it may change its sign)";
+      LOG(WARNING) << "EliminateDivMod: cannot fully eliminate div or mod because "
+                   << ModImpl(e, val_e, mode) << "  probably may change its sign";
       conditions.push_back(Select::make(e >= 0, mod >= 0, mod <= 0));
     }
 
     auto p = std::make_pair(div, mod);
-    expr_to_vars_[{e, val}] = p;
+    expr_to_vars_[std::make_tuple(mode, e, val)] = p;
     if (!e.same_as(mut)) {
-      expr_to_vars_[{mut, val}] = p;
+      expr_to_vars_[std::make_tuple(mode, mut, val)] = p;
     }
     return tresult(p);
   }
 
   // A custom comparison function for pairs of exprs and numbers. Compares exprs deeply.
   struct Compare_ {
-    bool operator()(const std::pair<Expr, int64_t>& p1, const std::pair<Expr, int64_t>& p2) {
-      if (p1.second < p2.second) {
+    bool operator()(const std::tuple<DivMode, Expr, int64_t>& p1,
+                    const std::tuple<DivMode, Expr, int64_t>& p2) {
+      if (std::get<0>(p1) < std::get<0>(p2)) {
         return true;
-      } else if (p1.second == p2.second) {
-        return Compare(p1.first, p2.first) < 0;
-      } else {
+      } else if (std::get<0>(p1) > std::get<0>(p2)) {
         return false;
+      } else if (std::get<2>(p1) < std::get<2>(p2)) {
+        return true;
+      } else if (std::get<2>(p1) > std::get<2>(p2)) {
+        return false;
+      } else {
+        return Compare(std::get<1>(p1), std::get<1>(p2)) < 0;
       }
     }
   };
@@ -1113,7 +1207,7 @@ class EliminateDivModMutator : public IRMutator {
   int idx_{0};
   // A map from pairs of exprs and numbers (e, n) to pairs of new vars (div, mod)
   // such that `div = e / n` and `mod = e % n`
-  std::map<std::pair<Expr, int64_t>, std::pair<Var, Var>, Compare_>
+  std::map<std::tuple<DivMode, Expr, int64_t>, std::pair<Var, Var>, Compare_>
     expr_to_vars_;
 };
 
@@ -1506,7 +1600,7 @@ DomainTransformation SolveSystemOfEquations(const Domain& domain) {
     } else {
       // The diagonal element is non-zero. A solution exists only if the diagonal element
       // is a divisor of the rhs[j]
-      new_cond = (truncmod(rhs[j], std::abs(matrix[j][j])) == 0);
+      new_cond = (floormod(rhs[j], std::abs(matrix[j][j])) == 0);
     }
     new_cond = SuperSimplify(new_cond, domain->ranges);
     if (is_const_int(new_cond, 0)) {
@@ -1533,11 +1627,11 @@ DomainTransformation SolveSystemOfEquations(const Domain& domain) {
       // The j-th variable is just a single value, don't create a tvm variable
       if (matrix[j][j] >= 0) {
         Expr a = make_const(rhs[j].type(), matrix[j][j]);
-        solution.push_back(SuperSimplify(rhs[j]/a, domain->ranges));
+        solution.push_back(SuperSimplify(floordiv(rhs[j], a), domain->ranges));
       } else {
         // This is required because some simplifiers have problems with dividing by negative numbers
         Expr a = make_const(rhs[j].type(), -matrix[j][j]);
-        solution.push_back(SuperSimplify((-rhs[j])/a, domain->ranges));
+        solution.push_back(SuperSimplify(floordiv(-rhs[j], a), domain->ranges));
       }
     }
   }
@@ -1948,11 +2042,19 @@ DomainTransformation DeskewDomain(const Domain& domain) {
       res_old_to_new.Set(var, bnd.equal[0]);
       ZE_LOG("Replaced with", bnd.equal[0]);
     } else {
-      Array<Expr> lowers = Concat(bnd.equal, bnd.lower);
-      Array<Expr> uppers = Concat(bnd.equal, bnd.upper);
+      std::vector<Expr> lowers(bnd.equal.begin(), bnd.equal.end());
+      std::vector<Expr> uppers(bnd.equal.begin(), bnd.equal.end());
+      for (const auto& expr : bnd.lower) lowers.push_back(expr);
+      for (const auto& expr : bnd.upper) uppers.push_back(expr);
 
-      ZE_LOG("Lowers", lowers);
-      ZE_LOG("Uppers", uppers);
+      ZE_LOG("LowersUnsorted", Array<Expr>(lowers));
+      ZE_LOG("UppersUnsorted", Array<Expr>(uppers));
+
+      std::sort(lowers.begin(), lowers.end(), ExprLess());
+      std::sort(uppers.begin(), uppers.end(), ExprLess());
+
+      ZE_LOG("Lowers", Array<Expr>(lowers));
+      ZE_LOG("Uppers", Array<Expr>(uppers));
 
       // Here we will try all pairs of lower and upper bounds and find the best pair, that is, the
       // pair with the minimal difference between the upper and the lower.
@@ -1971,53 +2073,39 @@ DomainTransformation DeskewDomain(const Domain& domain) {
           ZE_LOG_NL();
           ZE_LOG("Considering low", low);
           ZE_LOG("Considering upp", upp);
-          Expr diff_1 = SuperSimplify(truncdiv(upp - low, bnd.coef), vranges);
+          Expr diff_1 = SuperSimplify(floordiv(upp - low, bnd.coef), vranges);
           // Since diff may depend on some other variables, we compute its overapproximation
           Expr diff_over_1 = SuperSimplify(EvalSet(diff_1, new_var_intsets).max(), vranges);
 
           // low is the lower bound for v*coef, but we need the lower bound for v.
           // We use rounding-up division to compute it. Since we want to use a single formula
-          // without selects in as many cases as possible, we try to prove conditions manually.
-          Expr low_divided;
-          if (CanProve(low <= 0, vranges) || CanProve(truncmod(low, bnd.coef) == 0, vranges)) {
-            low_divided = truncdiv(low, bnd.coef);
-          } else if (CanProve(low > -bnd.coef, vranges)) {
-            low_divided = truncdiv(low + bnd.coef - 1, bnd.coef);
-          } else {
-            ZE_LOG("The sign of low is unknown:", low);
-            // We don't use the commented out rounding-up division here because it leads to
-            // overly complex expressions. So we just use the ordinary division.
-            // low_divided = (low + Select::make(low <= -bnd.coef, 0, bnd.coef - 1)) / bnd.coef;
-            low_divided = truncdiv(low, bnd.coef);
-            // However diff_1_over is not correct when we use the ordinary division, so increase it
-            diff_1 = diff_1 + 1;
-            diff_over_1 = diff_over_1 + 1;
-          }
-          low_divided = SuperSimplify(low_divided, vranges);
-
-          // Compute another difference which may be more precise (or not). Note that we may want
-          // to use flooring div here, but the ordinary division is ok for now.
-          Expr diff_2 = SuperSimplify(truncdiv(upp, bnd.coef - low_divided), vranges);
-          Expr diff_over_2 = SuperSimplify(EvalSet(diff_2, new_var_intsets).max(), vranges);
+          Expr low_divided = SuperSimplify(floordiv(low + bnd.coef - 1, bnd.coef), vranges);
 
           ZE_LOG("Considering low_divided", low_divided);
           ZE_LOG("Considering diff_1", diff_1);
           ZE_LOG("Considering diff_over_1", diff_over_1);
+
+          // Compute another difference which may be more precise (or not).
+          Expr diff_2 = SuperSimplify(floordiv(upp, bnd.coef) - low_divided, vranges);
+          Expr diff_over_2 = SuperSimplify(EvalSet(diff_2, new_var_intsets).max(), vranges);
+
           ZE_LOG("Considering diff_2", diff_2);
           ZE_LOG("Considering diff_over_2", diff_over_2);
 
+          if (CanProve(diff_over_2 - diff_over_1 < 0)) {
+            diff_over_1 = diff_over_2;
+          }
+
+          Expr diff_over_1_is_better_expr;
+          diff_over_1_is_better_expr = diff_over_1 - best_diff_over < 0;
+
           // If it is provable that the new one is strictly better than the current best one,
           // then replace it. Note that we are biased towards earlier pairs which should be simpler.
-          if (CanProve(diff_over_1 - best_diff_over < 0, vranges)) {
+          if (CanProve(diff_over_1_is_better_expr, vranges)) {
             ZE_LOG("Current best low", low_divided);
             ZE_LOG("Current best diff", diff_over_1);
             best_lower = low_divided;
             best_diff_over = diff_over_1;
-          } else if (CanProve(diff_over_2 - best_diff_over < 0, vranges)) {
-            ZE_LOG("Current best low", low_divided);
-            ZE_LOG("Current best diff", diff_over_2);
-            best_lower = low_divided;
-            best_diff_over = diff_over_2;
           }
         }
       }

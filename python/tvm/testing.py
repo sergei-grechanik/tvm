@@ -317,7 +317,7 @@ def estimate_performance(s, param_values=None, _processed_ops=None):
         return est(s.condition) + est(s.body)
     elif isinstance(s, stmt.Store):
         return est(s.value) + est(s.index) + est(s.predicate)
-    elif isinstance(s, (expr.Mul, expr.Div, expr.Mod)):
+    elif isinstance(s, (expr.Mul, expr.Div, expr.Mod, expr.FloorDiv, expr.FloorMod)):
         return est(s.a) + est(s.b) + PerformanceEstimate(multiplications=1)
     elif isinstance(s, (expr.BinaryOpExpr, expr.CmpExpr, expr.LogicalExpr)):
         if not hasattr(s, 'b'):

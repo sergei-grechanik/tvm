@@ -72,6 +72,7 @@ def run_expr(expr, vranges):
     sch = tvm.create_schedule(A.op)
     mod = tvm.build(sch, [A])
     mod(*args)
+    lowered = tvm.lower(sch, [A], simple_mode=True)
     return args[0].asnumpy()
 
 def check_bruteforce(bool_expr, vranges, cond=None):
@@ -483,28 +484,31 @@ def test_simplify_domain():
     _check(all(l - k < some_var, l >= k), [k, l, n], 50, {some_var: tvm.Range(0, 3)})
     _check(all(l - k < some_var, l >= k), [k, l, n], 25, {some_var: tvm.Range(0, 2)})
 
-    # TODO: This one fails, probably because of different div in the HalideIR Simplifier
-    #  k = tvm.reduce_axis((0, 3), name="k")
-    #  m = tvm.reduce_axis((0, 2), name="m")
-    #  x = tvm.reduce_axis((0, 4), name="x")
-    #  _check(all(k + m*3 == x), [k, m, x], 30)
+    k = tvm.reduce_axis((0, 3), name="k")
+    m = tvm.reduce_axis((0, 2), name="m")
+    x = tvm.reduce_axis((0, 4), name="x")
+    _check(all(k + m*3 == x), [k, m, x], 4)
 
     k = tvm.reduce_axis((0, 6), name="k")
     l = tvm.reduce_axis((0, 5), name="l")
     n = tvm.reduce_axis((0, 30), name="n")
 
-    # TODO: This one fails, probably because of different div in the HalideIR Simplifier
-    #  _check(all(k + l*6 == n), [k, l, n], 30)
-    #  _check(all(k + l*6 == n), [n, k, l], 30)
-    #  _check(all(k + l*6 == n), [n, l, k], 30)
+    _check(all(k + l*6 == n), [k, l, n], 30)
+    _check(all(k + l*6 == n), [n, k, l], 30)
+    _check(all(k + l*6 == n), [n, l, k], 30)
 
-    _check(all(n / 5 == k, n % 5 == l), [l, k, n], 30)
-    _check(all(n / 5 == k, n % 5 == l), [n, l, k], 30)
-    _check(all(n / 5 == k, n % 5 == l), [n, k, l], 30)
+    _check(all(tvm.truncdiv(n, 5) == k, tvm.truncmod(n, 5) == l), [l, k, n], 30)
+    _check(all(tvm.truncdiv(n, 5) == k, tvm.truncmod(n, 5) == l), [n, l, k], 30)
+    _check(all(tvm.truncdiv(n, 5) == k, tvm.truncmod(n, 5) == l), [n, k, l], 30)
+
+    _check(all(n // 5 == k, n % 5 == l), [l, k, n], 30)
+    _check(all(n // 5 == k, n % 5 == l), [n, l, k], 30)
+    _check(all(n // 5 == k, n % 5 == l), [n, k, l], 30)
 
     k = tvm.reduce_axis((0, 10), name="k")
     l = tvm.reduce_axis((0, 10), name="l")
-    _check(all((l + k)%3 <= 1, (l + k)/3 <= 2), [l, k], 48)
+    _check(all(tvm.truncmod(l + k, 3) <= 1, tvm.truncdiv(l + k, 3) <= 2), [l, k], 48)
+    _check(all((l + k)%3 <= 1, (l + k)//3 <= 2), [l, k], 48)
 
     # Some real-life examples (check only correctness)
     # 6400 -> 2916
