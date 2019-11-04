@@ -15,6 +15,14 @@
 <!--- specific language governing permissions and limitations -->
 <!--- under the License. -->
 
+**Note**: This is the branch implementing automatic differentiation for tensor expressions. I don't
+actively work on it right now, so I have doubts if it ever will be ready to be merged into TVM.
+However, I rebase this branch on the latest TVM from time to time.
+
+Tutorials:
+- [Tensor expression autodiff basics](autodiff_basics.md)
+- [Training a MNIST classifier with pure TVM](https://github.com/sgrechanik-h/tvm/blob/ad/training-with-tvm.ipynb)
+
 <img src=https://raw.githubusercontent.com/apache/incubator-tvm-site/master/images/logo/tvm-logo-small.png width=128/> Open Deep Learning Compiler Stack
 ==============================================
 [Documentation](https://docs.tvm.ai) |
