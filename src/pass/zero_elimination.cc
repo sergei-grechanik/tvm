@@ -2565,7 +2565,8 @@ Domain DomainNode::make(Array<Var> variables,
 }
 
 TVM_STATIC_IR_FUNCTOR(IRPrinter, vtable)
-.set_dispatch<DomainNode>([](const DomainNode* d, IRPrinter* p) {
+.set_dispatch<DomainNode>([](const ObjectRef& ref, IRPrinter* p) {
+    auto* d = static_cast<const DomainNode*>(ref.get());
     Type type = d->variables.empty() ? Int(32) : d->ranges[d->variables[0]]->extent.type();
     Expr volume = make_const(type, 1);
     for (const auto& v : d->variables) {
@@ -2602,7 +2603,8 @@ DomainTransformation DomainTransformationNode::make(Domain new_domain,
 }
 
 TVM_STATIC_IR_FUNCTOR(IRPrinter, vtable)
-.set_dispatch<DomainTransformationNode>([](const DomainTransformationNode* d, IRPrinter* p) {
+.set_dispatch<DomainTransformationNode>([](const ObjectRef& ref, IRPrinter* p) {
+    auto* d = static_cast<const DomainTransformationNode*>(ref.get());
     p->stream << "DomainTransformation(new_domain=" << d->new_domain
               << ", old_domain=" << d->old_domain
               << ", new_to_old=" << PrintSortedVarMap(d->new_to_old)

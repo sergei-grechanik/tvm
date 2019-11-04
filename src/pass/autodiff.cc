@@ -36,7 +36,8 @@ DifferentiationResult DifferentiationResultNode::make(Array<Tensor> result,
 }
 
 TVM_STATIC_IR_FUNCTOR(IRPrinter, vtable)
-.set_dispatch<DifferentiationResultNode>([](const DifferentiationResultNode* r, IRPrinter* p) {
+.set_dispatch<DifferentiationResultNode>([](const ObjectRef& ref, IRPrinter* p) {
+    auto* r = static_cast<const DifferentiationResultNode*>(ref.get());
     p->stream << "DifferentiationResult(result=" << r->result
               << ", adjoints=" << r->adjoints
               << ", adjoint_summands=" << r->adjoint_summands << ')';
