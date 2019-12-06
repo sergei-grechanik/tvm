@@ -1188,7 +1188,7 @@ class EliminateDivModMutator : public IRMutator {
   // A custom comparison function for pairs of exprs and numbers. Compares exprs deeply.
   struct Compare_ {
     bool operator()(const std::tuple<DivMode, Expr, int64_t>& p1,
-                    const std::tuple<DivMode, Expr, int64_t>& p2) {
+                    const std::tuple<DivMode, Expr, int64_t>& p2) const {
       if (std::get<0>(p1) < std::get<0>(p2)) {
         return true;
       } else if (std::get<0>(p1) > std::get<0>(p2)) {
